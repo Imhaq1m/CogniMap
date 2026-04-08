@@ -1,0 +1,630 @@
+/* =====================================================
+   CogniMap v2.0 — Dark Theme Stylesheet
+   ===================================================== */
+
+/* CSS Variables */
+:root {
+    --bg-dark: #1a1c23;
+    --bg-card: #24262d;
+    --bg-input: #1a1c23;
+    --text-main: #e2e8f0;
+    --text-muted: #94a3b8;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --border: #3f3f46;
+    --success: #10b981;
+    --warning: #fbbf24;
+    --danger: #ef4444;
+    --ai-bubble: #31333e;
+}
+
+/* Reset & Base */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body, html {
+    height: 100%;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    overflow: hidden;
+}
+
+/* =====================================================
+   Layout
+   ===================================================== */
+
+#app-container {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+}
+
+/* Sidebar */
+#sidebar {
+    width: 350px;
+    min-width: 350px;
+    background-color: var(--bg-card);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    z-index: 10;
+    box-shadow: 4px 0 10px rgba(0, 0, 0, 0.3);
+}
+
+/* Main Content */
+#main-content {
+    flex-grow: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Right Panel */
+#right-panel {
+    width: 0;
+    background-color: var(--bg-card);
+    border-left: 1px solid var(--border);
+    overflow: hidden;
+    transition: width 0.3s ease;
+    z-index: 20;
+    box-shadow: -4px 0 10px rgba(0, 0, 0, 0.3);
+}
+
+#right-panel.open {
+    width: 500px;
+}
+
+.panel-header {
+    background: var(--bg-dark);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+}
+
+.panel-header span {
+    font-size: 0.85rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+}
+
+#panel-content {
+    padding: 20px;
+    overflow-y: auto;
+    height: calc(100% - 60px);
+}
+
+.panel-placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    padding: 40px 20px;
+}
+
+/* =====================================================
+   Header
+   ===================================================== */
+
+.header {
+    margin-bottom: 20px;
+}
+
+.header h1 {
+    font-size: 1.5rem;
+    margin: 0 0 5px 0;
+    color: var(--accent-hover);
+}
+
+.tagline {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* =====================================================
+   Upload Section
+   ===================================================== */
+
+.upload-section {
+    margin-top: 15px;
+    padding: 15px;
+    background: rgba(99, 102, 241, 0.05);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+}
+
+.upload-section h3 {
+    font-size: 0.85rem;
+    margin: 0 0 10px 0;
+    color: var(--text-main);
+}
+
+.upload-status {
+    font-size: 0.75rem;
+    margin-top: 5px;
+    color: var(--text-muted);
+    min-height: 18px;
+}
+
+.file-list {
+    margin-top: 10px;
+    max-height: 120px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.file-list-empty {
+    padding: 8px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.75rem;
+}
+
+.file-item:last-child {
+    border-bottom: none;
+}
+
+.file-item button.delete-file {
+    background: none;
+    border: none;
+    color: var(--danger);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0 5px;
+}
+
+.file-item button.delete-file:hover {
+    color: #ff6b6b;
+}
+
+/* =====================================================
+   Footer
+   ===================================================== */
+
+.footer {
+    margin-top: auto;
+    padding-top: 20px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* =====================================================
+   Buttons
+   ===================================================== */
+
+.btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    width: 100%;
+    margin-top: 8px;
+    font-weight: 500;
+}
+
+.btn:hover:not(:disabled) {
+    background: var(--accent-hover);
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-main);
+}
+
+.btn-secondary:hover {
+    background: var(--border);
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    width: auto;
+}
+
+.btn-confirm {
+    background: var(--success);
+    font-size: 0.9rem;
+    padding: 12px 20px;
+}
+
+.btn-confirm:hover:not(:disabled) {
+    background: #059669;
+}
+
+/* =====================================================
+   File Input Wrapper
+   ===================================================== */
+
+.file-input-wrapper {
+    position: relative;
+    overflow: hidden;
+    display: inline-block;
+    width: 100%;
+}
+
+.file-input-wrapper input[type="file"] {
+    font-size: 100px;
+    position: absolute;
+    left: 0;
+    top: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+/* =====================================================
+   Concept Review Panel
+   ===================================================== */
+
+/* Backdrop for centered review panel */
+#review-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 50;
+    backdrop-filter: blur(2px);
+}
+
+/* Centered Review Panel */
+#review-panel {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 60%;
+    max-width: 800px;
+    height: 70vh;
+    max-height: 600px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.review-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 25px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-dark);
+    flex-shrink: 0;
+}
+
+.review-header h2 {
+    font-size: 1.1rem;
+    margin: 0;
+    color: var(--accent-hover);
+}
+
+#review-stats {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+/* Tree Structure - scrollable content area */
+.concept-tree {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 20px 25px;
+}
+
+.heading-group {
+    margin-bottom: 10px;
+}
+
+.heading-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(99, 102, 241, 0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* Heading concept item (main topic) - highlighted */
+.heading-concept-item {
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    margin-bottom: 10px;
+}
+
+/* Sub-concept item - indented */
+.sub-concept-item {
+    margin-left: 20px;
+    margin-bottom: 5px;
+    background: var(--bg-input);
+}
+
+.heading-title:hover {
+    background: rgba(99, 102, 241, 0.2);
+}
+
+.heading-toggle {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+
+.heading-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+.heading-name {
+    font-weight: bold;
+    font-size: 0.9rem;
+    flex-grow: 1;
+}
+
+.heading-count {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.heading-children {
+    margin-left: 20px;
+    margin-top: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.heading-children.collapsed {
+    display: none;
+}
+
+.concept-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.concept-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.concept-name {
+    flex-grow: 1;
+    font-size: 0.85rem;
+}
+
+.concept-name.editing {
+    display: none;
+}
+
+.concept-type-badge {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: rgba(99, 102, 241, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 5px;
+}
+
+.btn-toggle-heading {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.btn-toggle-heading:hover {
+    color: var(--accent-hover);
+    border-color: var(--accent);
+}
+
+.concept-edit-input {
+    flex-grow: 1;
+    background: var(--bg-dark);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: var(--text-main);
+    font-size: 0.85rem;
+    display: none;
+}
+
+.concept-edit-input.active {
+    display: block;
+}
+
+.btn-edit {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.btn-edit:hover {
+    color: var(--accent-hover);
+    border-color: var(--accent);
+}
+
+.concept-source {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Review Actions */
+/* Review Actions - sticky footer */
+.review-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px 25px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-dark);
+    flex-shrink: 0;
+}
+
+.review-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+/* =====================================================
+   Graph Container
+   ===================================================== */
+
+#graph-container {
+    flex-grow: 1;
+    position: relative;
+    background: var(--bg-dark);
+    min-height: 0;
+}
+
+#mynetwork {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-dark);
+}
+
+#mynetwork canvas {
+    background: var(--bg-dark) !important;
+}
+
+.overlay-stats {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(36, 38, 45, 0.8);
+    padding: 10px 15px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.8rem;
+    pointer-events: none;
+}
+
+/* =====================================================
+   Loading Overlay
+   ===================================================== */
+
+#loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.loading-spinner {
+    text-align: center;
+}
+
+.spinner {
+    border: 4px solid rgba(255, 255, 255, 0.1);
+    border-left-color: var(--accent);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 15px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+#loading-text {
+    font-size: 0.9rem;
+    color: var(--text-main);
+}
+
+/* =====================================================
+   Staleness Banner
+   ===================================================== */
+
+#staleness-banner {
+    background-color: var(--warning);
+    color: #000;
+    text-align: center;
+    padding: 8px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+}
+
+/* =====================================================
+   Scrollbar Styling
+   ===================================================== */
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-dark);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}

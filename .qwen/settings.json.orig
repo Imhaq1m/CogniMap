@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir *)",
+      "Bash(python *)",
+      "Bash(py *)",
+      "Bash(venv\\scripts\\activate)",
+      "Bash(pip install *)",
+      "Bash(uvicorn *)",
+      "Bash(streamlit *)",
+      "Bash(taskkill *)",
+      "Bash(select-object *)",
+      "Bash(timeout *)",
+      "Bash(del *)"
+    ]
+  }
+}

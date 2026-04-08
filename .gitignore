@@ -87,3 +87,10 @@ backups/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated data (do not commit)
+data/*.pdf
+data/*.db
+output/
+uploads/
+images_problem/

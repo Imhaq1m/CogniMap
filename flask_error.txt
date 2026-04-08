@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "C:\Users\Imran Hakim\CogniMap\app_flask.py", line 23, in <module>
+    from database import (
+    ...<10 lines>...
+    )
+  File "C:\Users\Imran Hakim\CogniMap\database.py", line 316, in <module>
+    initialize_database()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Imran Hakim\CogniMap\database.py", line 89, in initialize_database
+    print(f"\u2705 Database initialized at {DB_PATH}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Imran Hakim\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2705' in position 0: character maps to <undefined>

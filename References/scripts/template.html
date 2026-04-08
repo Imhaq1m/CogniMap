@@ -1,0 +1,1530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FYP Concept Graph - Hybrid AI Dashboard</title>
+    
+    <!-- Libraries -->
+    <link rel="stylesheet" href="/lib/vis-9.1.2/vis-network.css">
+    <link rel="stylesheet" href="/lib/tom-select/tom-select.css">
+    <script src="/lib/vis-9.1.2/vis-network.min.js"></script>
+    <script src="/lib/tom-select/tom-select.complete.min.js"></script>
+    <script src="/lib/bindings/utils.js"></script>
+    
+    <style>
+        :root {
+            --bg-dark: #1a1c23;
+            --bg-card: #24262d;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --border: #3f3f46;
+            --ai-bubble: #31333e;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            overflow: hidden;
+        }
+
+        #app-container {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Sidebar Styling */
+        #sidebar {
+            width: 400px;
+            background-color: var(--bg-card);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 10;
+            box-shadow: 4px 0 10px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            font-size: 1.25rem;
+            margin: 0 0 5px 0;
+            color: var(--accent-hover);
+        }
+
+        /* Upload Section */
+        .upload-section {
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(99, 102, 241, 0.05);
+            border: 1px dashed var(--border);
+            border-radius: 8px;
+        }
+
+        .upload-section h3 {
+            font-size: 0.85rem;
+            margin: 0 0 10px 0;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            width: 100%;
+            margin-top: 8px;
+            font-weight: 500;
+        }
+
+        .btn:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-main);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .file-input-wrapper input[type=file] {
+            font-size: 100px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        /* AI Assistant Section */
+        #ai-assistant {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            margin-top: 20px;
+            overflow: hidden;
+            border-top: 1px solid var(--border);
+            padding-top: 20px;
+        }
+
+        #chat-window {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding-right: 5px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 90%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            position: relative;
+        }
+
+        .message.ai {
+            background-color: var(--ai-bubble);
+            align-self: flex-start;
+            border-bottom-left-radius: 2px;
+            border: 1px solid var(--border);
+        }
+
+        .message.user {
+            background-color: var(--accent);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 2px;
+        }
+
+        .ai-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            color: var(--accent-hover);
+            font-weight: bold;
+            margin-bottom: 5px;
+            display: block;
+        }
+
+        .evidence-quote {
+            display: block;
+            margin-top: 10px;
+            padding-left: 10px;
+            border-left: 2px solid var(--accent-hover);
+            font-style: italic;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .source-tag {
+            display: inline-block;
+            margin-top: 8px;
+            font-size: 0.7rem;
+            color: var(--accent-hover);
+            background: rgba(99, 102, 241, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* Loading Dots Animation */
+        .typing-indicator {
+            display: inline-block;
+            width: 40px;
+            height: 10px;
+        }
+        .dot {
+            height: 4px;
+            width: 4px;
+            background-color: var(--text-muted);
+            border-radius: 50%;
+            display: inline-block;
+            margin: 0 2px;
+            animation: bounce 1.3s infinite ease-in-out;
+        }
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
+
+        /* Main Network Area */
+        #network-container {
+            flex-grow: 1;
+            position: relative;
+        }
+
+        /* Right Panel (Inspector + PDF) */
+        #right-panel {
+            width: 0;
+            background-color: var(--bg-card);
+            border-left: 1px solid var(--border);
+            transition: width 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 20;
+            box-shadow: -4px 0 10px rgba(0,0,0,0.3);
+        }
+
+        #right-panel.open {
+            width: 500px;
+        }
+
+        /* Split View Mode */
+        #right-panel.split-view {
+            width: 70vw; /* Occupy 70% of screen */
+            min-width: 900px;
+        }
+
+        #right-panel.split-view .tab-content {
+            display: flex !important; /* Force visibility */
+            position: absolute;
+            top: 45px; /* Below header */
+            bottom: 0;
+            width: 50%;
+            overflow-y: auto;
+        }
+
+        #right-panel.split-view #inspector-content {
+            left: 0;
+            border-right: 1px solid var(--border);
+        }
+
+        #right-panel.split-view #pdf-content {
+            right: 0;
+            display: flex !important;
+        }
+        
+        /* Hide tab buttons in split view to reduce confusion */
+        #right-panel.split-view .panel-tabs {
+            visibility: hidden;
+        }
+
+        .panel-header {
+            background: var(--bg-dark);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 15px;
+        }
+
+        .panel-tabs {
+            display: flex;
+            flex-grow: 1;
+        }
+
+        .tab-btn {
+            padding: 12px 20px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab-btn.active {
+            color: var(--accent-hover);
+            border-bottom-color: var(--accent-hover);
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        .tab-content {
+            display: none;
+            flex-grow: 1;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .tab-content.active {
+            display: flex;
+        }
+
+        #pdf-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* Inspector Fields */
+        .inspector-group {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .inspector-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .inspector-input, .inspector-textarea {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 0.9rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .inspector-textarea {
+            resize: vertical;
+            min-height: 80px;
+            line-height: 1.5;
+        }
+
+        .inspector-input:focus, .inspector-textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        .inspector-footer {
+            margin-top: auto;
+            padding: 20px 0;
+            display: flex;
+            gap: 10px;
+        }
+
+        #mynetwork {
+            width: 100%;
+            height: 100%;
+        }
+
+        .overlay-stats {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(36, 38, 45, 0.8);
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            font-size: 0.8rem;
+            pointer-events: none;
+        }
+        /* Staleness Warning Banner [UX-02] */
+        #staleness-banner {
+            display: none;
+            background-color: #fbbf24;
+            color: #000;
+            text-align: center;
+            padding: 8px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="staleness-banner">⚠️ Graph may be stale — source PDFs have changed. Re-run 'Process & Build Graph' to update.</div>
+
+    <div id="app-container">
+        <!-- Sidebar -->
+        <div id="sidebar">
+            <div class="header">
+                <h1>🧠 CogniMap</h1>
+                <p style="font-size: 0.8rem; color: var(--text-muted);">Socratic Learning Graph (HOTS-Ready)</p>
+            </div>
+
+            <div class="search-container">
+                <select id="concept-search" placeholder="Search concepts..."></select>
+            </div>
+
+            <div class="search-container" style="margin-top: 10px;">
+                <select id="source-filter" placeholder="Filter by Source PDF..."></select>
+            </div>
+
+            <div class="search-container" style="margin-top: 10px;">
+                <select id="complexity-filter" placeholder="Filter by Complexity..."></select>
+            </div>
+
+            <!-- Upload Section -->
+            <div class="upload-section">
+                <h3>📂 Manage PDFs</h3>
+                <div class="file-input-wrapper">
+                    <button class="btn btn-secondary">Select PDF(s)</button>
+                    <input type="file" id="pdf-upload" accept=".pdf" multiple />
+                </div>
+                <div id="upload-status" style="font-size: 0.75rem; margin-top: 5px; color: var(--text-muted);"></div>
+                
+                <!-- File List Container -->
+                <div id="file-list" style="margin-top: 10px; max-height: 120px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: rgba(0,0,0,0.2);">
+                    <div style="padding: 8px; font-size: 0.75rem; color: var(--text-muted); text-align: center;">No files uploaded</div>
+                </div>
+
+                <button id="process-btn" class="btn">✨ Process & Build Graph</button>
+                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                    <button id="focus-btn" class="btn" style="background: #8b5cf6;">🔍 Focus Mode: OFF</button>
+                    <button id="path-btn" class="btn" style="background: #10b981;">🛤️ Study Path</button>
+                </div>
+                <button id="clear-btn" class="btn btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">🗑️ Clear All Data</button>
+            </div>
+
+            <!-- Legend Section -->
+            <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px; font-size: 0.75rem;">
+                <div style="color: var(--text-muted); margin-bottom: 5px; font-weight: bold;">Complexity Levels</div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <span><span style="color: #10b981;">●</span> Intro</span>
+                    <span><span style="color: #fbbf24;">●</span> Core</span>
+                    <span><span style="color: #ef4444;">●</span> Advanced</span>
+                </div>
+            </div>
+
+            <div id="ai-assistant">
+                <div id="chat-window">
+                    <div class="message ai">
+                        <span class="ai-label">Local Assistant (Ollama)</span>
+                        Hello! I am your <b>Socratic Coach</b>. Click on a node or edge to see details in the Inspector or ask me questions here.
+                    </div>
+                </div>
+                <div id="quiz-container" style="display: none; flex-direction: column; padding: 15px; background: rgba(99, 102, 241, 0.1); border-top: 1px solid var(--border); margin-top: 10px; flex-grow: 1; overflow-y: auto;">
+                    <div id="quiz-header" style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 10px;">
+                        <span id="quiz-progress">Question 1 of 3</span>
+                        <span id="quiz-score">Score: 0</span>
+                    </div>
+                    <div id="quiz-question" style="font-size: 0.9rem; font-weight: bold; margin-bottom: 10px;"></div>
+                    <div id="quiz-options" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                    <div id="quiz-feedback" style="margin-top: 15px; padding: 10px; border-radius: 6px; font-size: 0.85rem; display: none;"></div>
+                    <div id="quiz-footer" style="margin-top: auto; display: flex; gap: 8px;">
+                        <button id="next-quiz-btn" class="btn" style="display: none; background: #10b981;">Next Question</button>
+                        <button id="close-quiz" class="btn btn-secondary" style="font-size: 0.7rem; padding: 10px;">Exit Quiz</button>
+                    </div>
+                </div>
+                <div id="node-actions" style="display: none; padding: 10px 0; border-top: 1px solid var(--border); margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+                    <button id="socratic-btn" class="btn" style="background: #6366f1;">🧠 Start Socratic Session</button>
+                    <button id="quiz-btn" class="btn" style="background: #ec4899;">❓ Quiz Me on this Topic</button>
+                    <button id="clear-chat-btn" class="btn btn-secondary" style="font-size: 0.7rem;">🧹 Clear Chat History</button>
+                </div>
+
+                <!-- Chat Input Area -->
+                <div id="chat-input-container" style="padding: 10px 0; border-top: 1px solid var(--border); margin-top: auto; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                        <label class="switch" style="position: relative; display: inline-block; width: 34px; height: 20px;">
+                            <input type="checkbox" id="eli5-toggle" style="opacity: 0; width: 0; height: 0;">
+                            <span class="slider round" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #3f3f46; transition: .4s; border-radius: 20px;"></span>
+                        </label>
+                        <span style="font-size: 0.75rem; color: var(--text-muted);"><b>ELI5 Mode</b> (Simple Analogies)</span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="chat-input" placeholder="Ask a question..." style="flex-grow: 1; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 0.85rem;" />
+                        <button id="send-btn" class="btn" style="width: auto; margin-top: 0; padding: 8px 15px;">Send</button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px; font-size: 0.7rem; color: var(--text-muted); text-align: center;">
+                FYP-Concept-Graph &copy; 2025
+            </div>
+        </div>
+
+        <!-- Main Graph Area -->
+        <div id="network-container">
+            <div id="mynetwork"></div>
+            <div class="overlay-stats">
+                <span id="node-count">0</span> Concepts | <span id="edge-count">0</span> Relationships
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div id="right-panel">
+            <div class="panel-header">
+                <div class="panel-tabs">
+                    <button id="tab-inspector" class="tab-btn active">Details</button>
+                    <button id="tab-pdf" class="tab-btn">Source PDF</button>
+                </div>
+                <div style="display:flex; gap:5px;">
+                    <button id="split-view-btn" class="btn btn-secondary" style="width: auto; padding: 2px 8px; margin: 0; font-size:0.75rem;">◫ Split View</button>
+                    <button id="close-right-panel" class="btn btn-secondary" style="width: auto; padding: 2px 8px; margin: 0;">&times;</button>
+                </div>
+            </div>
+
+            <!-- Inspector Tab -->
+            <div id="inspector-content" class="tab-content active">
+                <div id="node-inspector">
+                    <div class="inspector-group">
+                        <label class="inspector-label">AI Confidence Score</label>
+                        <div id="ins-node-confidence-container" style="display:flex; align-items:center; gap:10px;">
+                            <div style="flex-grow:1; height:8px; background:var(--bg-dark); border-radius:4px; overflow:hidden; border:1px solid var(--border);">
+                                <div id="ins-node-confidence-bar" style="height:100%; width:0%; transition:width 0.5s ease;"></div>
+                            </div>
+                            <span id="ins-node-confidence-text" style="font-size:0.75rem; font-weight:bold; min-width:35px;">0%</span>
+                        </div>
+                    </div>
+                    <div class="inspector-group">
+                        <label class="inspector-label">Concept Name</label>
+                        <input type="text" id="ins-node-id" class="inspector-input" />
+                    </div>
+                    <div class="inspector-group">
+                        <label class="inspector-label">Cognitive Anchor</label>
+                        <div id="ins-node-anchor-status" style="font-size: 0.75rem; color: var(--accent-hover); margin-bottom: 5px;"></div>
+                        <input type="text" id="ins-node-type" class="inspector-input" placeholder="e.g. Core Concept" />
+                    </div>
+                    <div class="inspector-group">
+                        <label class="inspector-label">HOTS Explanation</label>
+                        <textarea id="ins-node-description" class="inspector-textarea" style="min-height: 100px;"></textarea>
+                    </div>
+                    <div class="inspector-group">
+                        <label class="inspector-label">Mental Model (Analogy)</label>
+                        <textarea id="ins-node-mental-model" class="inspector-textarea" placeholder="Visualize this as..."></textarea>
+                    </div>
+                    <div class="inspector-group">
+                        <label class="inspector-label">Socratic Challenge</label>
+                        <div style="background: rgba(99, 102, 241, 0.1); padding: 10px; border-radius: 6px; font-style: italic; border-left: 3px solid var(--accent);" id="ins-node-socratic-seed"></div>
+                    </div>
+
+                    <!-- Isolation Warning -->
+                    <div id="ins-isolation-warning" style="display:none; background: rgba(239,68,68,0.1); 
+                         border: 1px solid #ef4444; border-radius: 6px; padding: 10px; margin-top: 10px;">
+                        ⚠️ <strong>Unconnected Concept</strong>
+                        <p id="ins-isolation-text" style="font-size: 0.8rem; margin: 5px 0 0 0;"></p>
+                        <p style="font-size: 0.75rem; color: #94a3b8;">
+                            Open the PDF viewer to find a real connection, then add it manually.
+                        </p>
+                    </div>
+
+                    <!-- Loop Warning -->
+                    <div id="ins-loop-warning" style="display:none; background: rgba(245,158,11,0.1); 
+                         border: 1px solid #f59e0b; border-radius: 6px; padding: 10px; margin-top: 10px;">
+                        🔄 <strong>Logical Loop Detected</strong>
+                        <p id="ins-loop-text" style="font-size: 0.8rem; margin: 5px 0 0 0; color: var(--text-main);"></p>
+                        <p style="font-size: 0.75rem; color: #94a3b8; margin-top: 5px;">
+                            Students cannot learn these concepts in a linear order. Review the prerequisite relationships and break the cycle.
+                        </p>
+                    </div>
+                </div>
+
+                <div id="edge-inspector" style="display:none;">
+                    <div class="inspector-group">
+                        <label class="inspector-label">Relationship Flow</label>
+                        <div id="ins-edge-title" style="font-size: 0.9rem; font-weight: bold; margin-bottom: 10px; color: var(--accent-hover);">Source → Target</div>
+                    </div>
+                    <div class="inspector-group">
+                        <label class="inspector-label">Connection Type</label>
+                        <select id="ins-edge-type" class="inspector-input">
+                            <option value="PREREQUISITE">Prerequisite (Linear)</option>
+                            <option value="HIERARCHICAL">Hierarchical (Parent/Child)</option>
+                            <option value="ASSOCIATIVE">Associative (Dashed)</option>
+                            <option value="CONTRASTS">Contrasts (Opposing)</option>
+                            <option value="CHALLENGES">Challenges (Conflict)</option>
+                            <option value="IMPLEMENTS">Implements (Action)</option>
+                        </select>
+                    </div>
+                    <div class="inspector-group">
+                        <label class="inspector-label">Cognitive Logic</label>
+                        <textarea id="ins-edge-explanation" class="inspector-textarea" style="min-height: 150px;"></textarea>
+                    </div>
+                    <div class="inspector-group" style="flex-direction: row; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px;">
+                        <input type="checkbox" id="ins-edge-verified" style="width: 20px; height: 20px; cursor: pointer;" />
+                        <label for="ins-edge-verified" style="font-size: 0.85rem; cursor: pointer;"><b>Verified by Learner</b> (Evidence Found)</label>
+                    </div>
+                </div>
+
+                <div class="inspector-footer">
+                    <button id="ins-save-btn" class="btn">💾 Save & Update Graph</button>
+                    <button id="ins-view-pdf-btn" class="btn btn-secondary">📄 View Citation</button>
+                </div>
+            </div>
+
+            <!-- PDF Tab -->
+            <div id="pdf-content" class="tab-content">
+                <iframe id="pdf-frame"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        var nodes = new vis.DataSet();
+        var edges = new vis.DataSet();
+        var network = null;
+        var selectedItem = null;
+        var globalConversationHistory = []; // General queries
+        var nodeChatHistories = new Map(); // Node-specific persistent chats
+        const MAX_HISTORY_TURNS = 10;
+
+        function buildVisNodes(concepts) {
+            return concepts.map(concept => {
+                const cid = concept.id;
+                const deg = concept.degree || 0;
+                const size = 20 + (deg * 3);
+                
+                const complexity = concept.complexity || 1;
+                const colors = ["#94a3b8", "#10b981", "#34d399", "#fbbf24", "#f87171", "#ef4444"];
+                const color = colors[Math.min(complexity, 5)];
+                
+                const isAnchor = concept.is_anchor;
+                const isIsolated = concept.is_isolated;
+                const hasLoop = concept.has_logical_loop;
+                // [FIX-UX-04] Correctly handle confidence: 0 (masked by ||)
+                const confidence = (concept.ai_confidence_score !== undefined && concept.ai_confidence_score !== null) ? concept.ai_confidence_score : 0.5;
+                const mastery = concept.mastery_score || 0;
+                
+                const shape = isAnchor ? "diamond" : (isIsolated ? "triangleDown" : (hasLoop ? "hexagon" : "dot"));
+                const borderWidth = (isIsolated || hasLoop) ? 4 : (isAnchor ? 4 : 2);
+                const borderColor = hasLoop ? "#f59e0b" : (isIsolated ? "#ef4444" : (isAnchor ? "#6366f1" : color));
+                
+                // Status Mapping [UX-05]
+                const statusMap = {
+                    "verified": "Verified ✅",
+                    "partial_match": "Partially Grounded ⚠️",
+                    "not_found_on_page": "Not Confirmed ❌",
+                    "anchor_unverified": "Cross-Topic Bridge 🔗",
+                    "uncited": "Uncited",
+                    "unknown": "Unknown"
+                };
+                const displayStatus = statusMap[concept.validation_status] || concept.validation_status;
+
+                let tooltip = `<b>${cid}</b><br>${concept.description || ""}`;
+                tooltip += `<br><br>🛡️ <b>Grounding:</b> ${displayStatus} (${Math.round(confidence*100)}%)`;
+                tooltip += `<br>🎓 <b>Mastery:</b> ${Math.round(mastery*100)}%`;
+                if (concept.study_rank_display) tooltip += `<br>📍 <b>Study:</b> ${concept.study_rank_display}`;
+                if (isAnchor) tooltip += `<br><span style='color:#6366f1'><b>Anchor Concept</b></span>`;
+                if (isIsolated) tooltip += `<br><span style='color:#ef4444'><b>Unconnected Concept</b></span>`;
+                if (hasLoop) tooltip += `<br><span style='color:#f59e0b'><b>🔄 Logical Loop Detected</b></span>`;
+                if (concept.mental_model) tooltip += `<br><i>Model: ${concept.mental_model}</i>`;
+                if (concept.socratic_seed) tooltip += `<br><br><b>Challenge:</b> ${concept.socratic_seed}`;
+
+                return {
+                    id: cid,
+                    label: hasLoop ? `🔄 ${cid}` : (isAnchor ? `★ ${cid}` : cid),
+                    description: concept.description || "",
+                    mental_model: concept.mental_model || "",
+                    edge_case: concept.edge_case || "",
+                    socratic_seed: concept.socratic_seed || "",
+                    title: tooltip,
+                    concept_type: concept.type || "General",
+                    complexity: complexity,
+                    study_rank: concept.study_rank || 0,
+                    study_rank_display: concept.study_rank_display || "",
+                    sources: concept.sources || [],
+                    page_references: concept.page_references || [],
+                    is_isolated: isIsolated,
+                    isolation_note: concept.isolation_note || "",
+                    has_logical_loop: hasLoop,
+                    loop_warning: concept.loop_warning || "",
+                    ai_confidence_score: confidence,
+                    validation_status: concept.validation_status || "unknown",
+                    mastery_score: mastery,
+                    size: size + (isAnchor ? 5 : 0),
+                    color: {
+                        background: (isIsolated || hasLoop) ? "#3f3f46" : color,
+                        border: borderColor,
+                        highlight: { border: "#ffffff", background: (isIsolated || hasLoop) ? "#3f3f46" : color }
+                    },
+                    shape: shape,
+                    borderWidth: borderWidth,
+                    font: { size: 14 + (deg / 2), bold: isAnchor || hasLoop }
+                };
+            });
+        }
+
+        function buildVisEdges(relationships) {
+            return relationships.map(rel => {
+                const rel_type = rel.type || "ASSOCIATIVE";
+                const confidence = rel.ai_confidence_score || 0.5;
+                const status = rel.validation_status || "unknown";
+
+                let color = { color: "#475569" };
+                if (rel_type === "HIERARCHICAL") color.color = "#818cf8";
+                if (rel_type === "PREREQUISITE") color.color = "#f59e0b";
+                if (rel_type === "CONTRASTS") color.color = "#f87171";
+                if (rel_type === "CHALLENGES") color.color = "#ef4444";
+                if (rel_type === "IMPLEMENTS") color.color = "#10b981";
+
+                // Flag Low Confidence
+                if (confidence < 0.6 && !rel.synthesized) {
+                    color.color = "#71717a"; // Muted if unverifiable
+                }
+
+                const logic = rel.logic || rel.explanation || "";
+                let isAssociative = ["CONTRASTS", "CHALLENGES", "ASSOCIATIVE", "CONCEPTUAL_PROXY"].includes(rel_type);
+
+                let title = `<b>${rel.source} → ${rel.target}</b> (${rel_type})<br>${logic}`;
+                title += `<br><br>🛡️ <b>Confidence:</b> ${Math.round(confidence*100)}% (${status})`;
+
+                if (rel.synthesized) {
+                    isAssociative = true;
+                    color.color = '#6b7280';
+                    title += "<br><br><i>This is a synthesized bridge suggested by AI to connect topics. It may not have direct evidence in the source text.</i>";
+                }
+
+                return {
+                    from: rel.source,
+                    to: rel.target,
+                    label: rel_type,
+                    rel_type: rel_type,
+                    logic: logic,
+                    title: title,
+                    color: color,
+                    width: isAssociative ? 1.5 : 3,
+                    dashes: isAssociative || confidence < 0.6,
+                    arrows: "to",
+                    ai_confidence_score: confidence,
+                    validation_status: status,
+                    source_ref: rel.source_ref || "",
+                    page_references: rel.page_references || []
+                };
+            });
+        }
+        var focusMode = false;
+        var activeFilters = { source: null, complexity: null };
+
+        async function loadGraphData() {
+            const resp = await fetch('/api/graph');
+            const raw = await resp.json();
+
+            const nodesData = buildVisNodes(raw.concepts || []);
+            const edgesData = buildVisEdges(raw.relationships || []);
+            const allSources = [...new Set((raw.concepts || []).flatMap(c => c.sources || []))];
+
+            nodes.clear();
+            nodes.add(nodesData);
+            edges.clear();
+            edges.add(edgesData);
+            
+            initNetwork();
+            populateSourceFilter(allSources);
+            populateComplexityFilter();
+            
+            document.getElementById('node-count').innerText = nodes.length;
+            document.getElementById('edge-count').innerText = edges.length;
+            
+            // Re-init search bar with new data
+            const searchSelect = document.getElementById('concept-search');
+            if (searchSelect.tomselect) searchSelect.tomselect.destroy();
+            new TomSelect('#concept-search', {
+                valueField: 'id', labelField: 'id', searchField: 'id', options: nodesData,
+                onChange: (val) => { if(val) { network.selectNodes([val]); network.focus(val, {scale:1, animation:true}); network.emit('click', {nodes:[val], edges:[]}); } }
+            });
+        }
+
+        function populateSourceFilter(sources) {
+            const filterSelect = document.getElementById('source-filter');
+            if (filterSelect.tomselect) filterSelect.tomselect.destroy();
+            new TomSelect('#source-filter', {
+                valueField: 'id', labelField: 'id', searchField: 'id', options: sources.map(s=>({id:s})), allowEmptyOption:true, placeholder:"Filter by Source PDF...",
+                onChange: (src) => {
+                    activeFilters.source = src;
+                    applyFilters();
+                }
+            });
+        }
+
+        function populateComplexityFilter() {
+            const filterSelect = document.getElementById('complexity-filter');
+            if (filterSelect.tomselect) filterSelect.tomselect.destroy();
+            const options = [
+                {id: '1', title: 'Intro (1)'},
+                {id: '2', title: 'Core (2)'},
+                {id: '3', title: 'Intermediate (3)'},
+                {id: '4', title: 'Advanced (4)'},
+                {id: '5', title: 'Expert (5)'}
+            ];
+            new TomSelect('#complexity-filter', {
+                valueField: 'id', labelField: 'title', searchField: 'title', options: options, allowEmptyOption:true, placeholder:"Filter by Complexity...",
+                onChange: (lvl) => {
+                    activeFilters.complexity = lvl ? parseInt(lvl) : null;
+                    applyFilters();
+                }
+            });
+        }
+
+        function applyFilters() {
+            const allNodes = nodes.get();
+            const allEdges = edges.get();
+            
+            nodes.update(allNodes.map(n => {
+                let hidden = false;
+                if (activeFilters.source && !n.sources.includes(activeFilters.source)) hidden = true;
+                if (activeFilters.complexity && n.complexity !== activeFilters.complexity) hidden = true;
+                
+                // Focus Mode logic overlaps filters
+                if (focusMode && window.selectedNode) {
+                    const neighbors = network.getConnectedNodes(window.selectedNode.id);
+                    if (n.id !== window.selectedNode.id && !neighbors.includes(n.id)) hidden = true;
+                }
+                
+                return { id: n.id, hidden: hidden };
+            }));
+
+            // Sync edges
+            const visibleNodeIds = new Set(nodes.get({ filter: n => !n.hidden }).map(n => n.id));
+            edges.update(allEdges.map(e => ({
+                id: e.id,
+                hidden: !visibleNodeIds.has(e.from) || !visibleNodeIds.has(e.to)
+            })));
+        }
+
+        async function handleSelection(params) {
+            const panel = document.getElementById('right-panel');
+            let itemFound = false;
+
+            if (params.nodes && params.nodes.length > 0) {
+                var nodeId = params.nodes[0];
+                var nodeData = nodes.get(nodeId);
+                if (nodeData) {
+                    selectedItem = { type: 'node', data: nodeData };
+                    
+                    // Fetch Persistent History from Backend
+                    const chatWindow = document.getElementById('chat-window');
+                    chatWindow.innerHTML = '';
+                    
+                    try {
+                        const histResp = await fetch(`/api/chat/history/${encodeURIComponent(nodeId)}`);
+                        const history = await histResp.json();
+                        nodeChatHistories.set(nodeId, history);
+                        
+                        if (history.length > 0) {
+                            history.forEach(msg => {
+                                addMessage(msg.content, msg.role === 'user' ? 'user' : 'ai');
+                            });
+                        } else {
+                            addMessage(`Welcome to the Socratic Deep Dive for <b>${nodeId}</b>. I've prepared a challenge based on its mental model. Click 'Start Socratic Session' to begin.`, 'ai', null, 'System');
+                        }
+                    } catch (e) {
+                        addMessage("Welcome! History unavailable.", "ai", null, "System");
+                    }
+
+                    document.getElementById('edge-inspector').style.display = 'none';
+                    document.getElementById('node-inspector').style.display = 'block';
+
+                    document.getElementById('ins-node-id').value = nodeData.id;
+                    document.getElementById('ins-node-type').value = nodeData.concept_type || "";
+                    document.getElementById('ins-node-description').value = nodeData.description || "";
+                    document.getElementById('ins-node-mental-model').value = nodeData.mental_model || "";
+                    document.getElementById('ins-node-socratic-seed').innerText = nodeData.socratic_seed || "Explore the connections to reveal challenges.";
+                    
+                    // Update Confidence Score
+                    const conf = nodeData.ai_confidence_score || 0;
+                    const bar = document.getElementById('ins-node-confidence-bar');
+                    const text = document.getElementById('ins-node-confidence-text');
+                    bar.style.width = `${conf * 100}%`;
+                    bar.style.background = conf > 0.8 ? "#10b981" : (conf > 0.5 ? "#fbbf24" : "#ef4444");
+                    text.innerText = `${Math.round(conf * 100)}%`;
+
+                    const anchorStatus = document.getElementById('ins-node-anchor-status');
+                    if (nodeData.sources && nodeData.sources.length >= 2) {
+                        anchorStatus.innerHTML = `★ <b>Anchor Concept</b> (Linked across ${nodeData.sources.length} sources)`;
+                    } else {
+                        anchorStatus.innerHTML = "";
+                    }
+
+                    if (nodeData.is_isolated) {
+                        document.getElementById('ins-isolation-warning').style.display = 'block';
+                        document.getElementById('ins-isolation-text').innerText = nodeData.isolation_note;
+                    } else {
+                        document.getElementById('ins-isolation-warning').style.display = 'none';
+                    }
+
+                    if (nodeData.has_logical_loop) {
+                        document.getElementById('ins-loop-warning').style.display = 'block';
+                        document.getElementById('ins-loop-text').innerText = nodeData.loop_warning;
+                    } else {
+                        document.getElementById('ins-loop-warning').style.display = 'none';
+                    }
+
+                    panel.classList.add('open');
+                    switchTab('inspector');
+                    document.getElementById('node-actions').style.display = 'block';
+                    window.selectedNode = nodeData;
+                    itemFound = true;
+                }
+            } else if (params.edges && params.edges.length > 0) {
+                var edgeId = params.edges[0];
+                var edgeData = edges.get(edgeId);
+                if (edgeData) {
+                    selectedItem = { type: 'edge', data: edgeData };
+                    document.getElementById('node-inspector').style.display = 'none';
+                    document.getElementById('ins-isolation-warning').style.display = 'none';
+                    document.getElementById('edge-inspector').style.display = 'block';
+
+                    document.getElementById('ins-edge-title').innerText = `${edgeData.from} → ${edgeData.to}`;
+                    document.getElementById('ins-edge-type').value = edgeData.rel_type;
+                    document.getElementById('ins-edge-explanation').value = edgeData.logic || "";
+                    document.getElementById('ins-edge-verified').checked = edgeData.verified || false;
+
+                    panel.classList.add('open');
+                    switchTab('inspector');
+                    document.getElementById('node-actions').style.display = 'none';
+                    itemFound = true;
+                }
+            }
+
+            if (!itemFound) {
+                panel.classList.remove('open');
+                document.getElementById('node-actions').style.display = 'none';
+            }
+
+            if (typeof neighbourhoodHighlight === 'function') {
+                requestAnimationFrame(() => neighbourhoodHighlight(params));
+            }
+        }
+
+        function initNetwork() {
+            var container = document.getElementById('mynetwork');
+            var data = { nodes: nodes, edges: edges };
+            var options = {
+                nodes: { shape: 'dot', font: { size: 14, color: '#ffffff', face: 'Inter' }, borderWidth: 2, shadow: true },
+                edges: { width: 2, color: { color: '#475569', highlight: '#818cf8', hover: '#818cf8' }, arrows: { to: { enabled: true, scaleFactor: 0.5 } }, smooth: { type: 'continuous' }, shadow: true },
+                physics: { forceAtlas2Based: { gravitationalConstant: -250, centralGravity: 0.005, springLength: 350, springConstant: 0.08, avoidOverlap: 1 }, solver: 'forceAtlas2Based', stabilization: { iterations: 1000 } },
+                interaction: { hover: true, navigationButtons: true, keyboard: true, multiselect: false, selectConnectedEdges: false }
+            };
+
+            if (network) network.destroy();
+            network = new vis.Network(container, data, options);
+            network.on("click", handleSelection);
+            network.on("deselectNode", () => {
+                if (network.getSelectedNodes().length === 0 && network.getSelectedEdges().length === 0) {
+                    document.getElementById('right-panel').classList.remove('open');
+                }
+            });
+        }
+
+        function switchTab(tab) {
+            ['inspector', 'pdf'].forEach(t => {
+                document.getElementById(`tab-${t}`).classList.remove('active');
+                document.getElementById(`${t}-content`).classList.remove('active');
+            });
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            document.getElementById(`${tab}-content`).classList.add('active');
+        }
+
+        function openPdf(filename, page) {
+            const frame = document.getElementById('pdf-frame');
+            frame.src = `/data/${filename}#page=${page}`;
+            document.getElementById('right-panel').classList.add('open');
+            switchTab('pdf');
+        }
+
+        async function aiChatRequest(type, data, preGeneratedReply = null) {
+            var userContent = "";
+            let conceptContext = null;
+            let targetNodeId = window.selectedNode ? window.selectedNode.id : null;
+
+            if (type === 'node') {
+                userContent = `I want to explore "${data.id}".`;
+                conceptContext = data;
+                targetNodeId = data.id;
+            } else if (type === 'socratic') {
+                userContent = `Let's start the Socratic challenge for "${data.id}".`;
+                conceptContext = data;
+                targetNodeId = data.id;
+            } else if (type === 'general') {
+                userContent = data.query;
+                conceptContext = window.selectedNode;
+            }
+
+            // Get or create history for this context
+            const historyKey = targetNodeId || "global";
+            if (!nodeChatHistories.has(historyKey)) {
+                nodeChatHistories.set(historyKey, []);
+            }
+            const currentHistory = nodeChatHistories.get(historyKey);
+
+            addMessage(userContent, "user");
+            currentHistory.push({ role: "user", content: userContent });
+
+            const trimmedHistory = currentHistory.slice(-MAX_HISTORY_TURNS * 2);
+            var indicator = addTypingIndicator();
+            
+            try {
+                const resp = await fetch('/api/chat', { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ 
+                        history: trimmedHistory,
+                        concept_context: conceptContext,
+                        eli5: document.getElementById('eli5-toggle').checked
+                    }) 
+                });
+                
+                if (!resp.ok) {
+                    const errData = await resp.json();
+                    throw new Error(errData.reply || "Server Error");
+                }
+
+                const res = await resp.json();
+                indicator.remove();
+                
+                currentHistory.push({ role: "assistant", content: res.reply });
+                addMessage(res.reply, "ai");
+            } catch (err) {
+                indicator.remove();
+                addMessage(`❌ <b>Ollama Offline/Busy:</b> ${err.message}. Please check if the Ollama server is running locally.`, "ai", null, "System");
+            }
+        }
+
+        function addMessage(text, type, metadata = null, labelText = 'Local Ollama') {
+            var chatWindow = document.getElementById('chat-window');
+            var msgDiv = document.createElement('div');
+            msgDiv.className = 'message ' + type;
+            if (type === 'ai') {
+                var label = document.createElement('span');
+                label.className = 'ai-label';
+                label.innerText = labelText;
+                msgDiv.appendChild(label);
+            }
+            var textContent = document.createElement('div');
+            textContent.innerHTML = text.replace(/\n/g, '<br>'); // Basic markdown-to-html for line breaks
+            msgDiv.appendChild(textContent);
+            // ... rest of metadata logic ...
+            if (metadata) {
+                if (metadata.evidence) {
+                    var quote = document.createElement('span');
+                    quote.className = 'evidence-quote';
+                    quote.innerText = '"' + metadata.evidence + '"';
+                    msgDiv.appendChild(quote);
+                }
+                if (metadata.source) {
+                    var source = document.createElement('span');
+                    source.className = 'source-tag';
+                    source.style.cursor = 'pointer';
+                    source.innerText = metadata.source + ' (P. ' + metadata.page + ')';
+                    source.onclick = () => openPdf(metadata.source, metadata.page);
+                    msgDiv.appendChild(source);
+                }
+            }
+            chatWindow.appendChild(msgDiv);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+            return msgDiv;
+        }
+
+        function addTypingIndicator() {
+            var chatWindow = document.getElementById('chat-window');
+            var indicator = document.createElement('div');
+            indicator.className = 'message ai typing-box';
+            indicator.innerHTML = '<span class="ai-label">Gemini AI</span><div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
+            chatWindow.appendChild(indicator);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+            return indicator;
+        }
+
+        async function saveInspectorChanges() {
+            if (!selectedItem) return;
+            const btn = document.getElementById('ins-save-btn');
+            btn.disabled = true;
+            btn.innerText = "⏳ Saving...";
+
+            let payload = { type: selectedItem.type, data: {} };
+            if (selectedItem.type === 'node') {
+                payload.data = {
+                    old_id: selectedItem.data.id,
+                    id: document.getElementById('ins-node-id').value,
+                    type: document.getElementById('ins-node-type').value,
+                    description: document.getElementById('ins-node-description').value
+                };
+            } else {
+                payload.data = {
+                    source: selectedItem.data.from,
+                    target: selectedItem.data.to,
+                    type: document.getElementById('ins-edge-type').value,
+                    explanation: document.getElementById('ins-edge-explanation').value
+                };
+            }
+
+            try {
+                const resp = await fetch('/api/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (resp.ok) {
+                    addMessage(`✅ Changes to <b>${payload.data.id || (payload.data.source + '→' + payload.data.target)}</b> saved.`, "ai", null, "System");
+                    loadGraphData(); // Reload data without full refresh
+                } else {
+                    const res = await resp.json();
+                    alert("Save failed: " + res.error);
+                }
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "💾 Save Changes";
+            }
+        }
+
+        window.onload = function() {
+            loadGraphData();
+            checkStatus(); // Recover state on refresh
+
+            // File Management
+            const refreshFiles = async () => {
+                const list = document.getElementById('file-list');
+                const resp = await fetch('/api/files');
+                const data = await resp.json();
+                list.innerHTML = data.files.length ? data.files.map(f => `<div style="display:flex;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--border);font-size:0.75rem;"><span>${f}</span><button onclick="deleteFile('${f}')" style="background:none;border:none;color:#f87171;cursor:pointer;">&times;</button></div>`).join('') : '<div style="padding:8px;text-align:center;font-size:0.75rem;color:var(--text-muted);">No files</div>';
+            };
+            window.deleteFile = async (f) => { 
+                if(confirm(`Delete ${f}?`)) { 
+                    await fetch(`/api/delete/${encodeURIComponent(f)}`, {method:'DELETE'}); 
+                    refreshFiles(); 
+                    // [FIX-UX-02] Trigger staleness warning after file deletion
+                    document.getElementById('staleness-banner').style.display = 'block';
+                } 
+            };
+            refreshFiles();
+
+            // Upload
+            document.getElementById('pdf-upload').onchange = async (e) => {
+                const status = document.getElementById('upload-status');
+                const files = e.target.files;
+                if (files.length === 0) return;
+
+                status.innerText = `⏳ Uploading ${files.length} file(s)...`;
+                status.style.color = "var(--accent-hover)";
+
+                let successCount = 0;
+                for (const file of files) {
+                    const fd = new FormData();
+                    fd.append('file', file);
+                    try {
+                        const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+                        if (resp.ok) {
+                            successCount++;
+                        } else {
+                            const err = await resp.json();
+                            console.error("Upload failed for " + file.name, err);
+                        }
+                    } catch (err) {
+                        console.error("Network error during upload:", err);
+                    }
+                }
+
+                status.innerText = `✅ Successfully uploaded ${successCount}/${files.length} files.`;
+                status.style.color = "#10b981";
+                
+                // Clear input so selecting the same file again triggers onchange
+                e.target.value = '';
+                
+                setTimeout(() => { status.innerText = ""; }, 5000);
+                refreshFiles();
+            };
+
+            // Buttons
+            document.getElementById('process-btn').onclick = async () => {
+                const btn = document.getElementById('process-btn');
+                btn.disabled = true;
+                addMessage("🚀 Initiating graph extraction and building pipeline...", "ai", null, "System");
+                
+                try {
+                    const resp = await fetch('/api/process', { method: 'POST' });
+                    if (resp.ok) {
+                        startPolling();
+                    } else {
+                        const err = await resp.json();
+                        addMessage(`❌ Pipeline failed to start: ${err.error}`, "ai", null, "System");
+                        btn.disabled = false;
+                    }
+                } catch (err) {
+                    addMessage(`❌ Network error: ${err.message}`, "ai", null, "System");
+                    btn.disabled = false;
+                }
+            };
+
+            document.getElementById('socratic-btn').onclick = () => {
+                if (window.selectedNode) {
+                    aiChatRequest('socratic', window.selectedNode);
+                }
+            };
+
+            // Quiz Implementation
+            let currentQuizData = null;
+            let currentQuizIndex = 0;
+            let currentQuizScore = 0;
+            const QUIZ_LENGTH = 3;
+
+            document.getElementById('quiz-btn').onclick = async () => {
+                if (!window.selectedNode) return;
+                const btn = document.getElementById('quiz-btn');
+                btn.disabled = true;
+                btn.innerText = "⏳ Generating Quiz...";
+                
+                currentQuizScore = 0;
+                currentQuizIndex = 0;
+                currentQuizData = [];
+
+                try {
+                    // Generate 3 questions sequentially or in a loop
+                    for (let i = 0; i < QUIZ_LENGTH; i++) {
+                        const resp = await fetch('/api/quiz', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                subject: window.selectedNode.id,
+                                context: `${window.selectedNode.description} (Question ${i+1}/${QUIZ_LENGTH})`
+                            })
+                        });
+                        const q = await resp.json();
+                        if (q.error) throw new Error(q.error);
+                        currentQuizData.push(q);
+                    }
+                    
+                    showQuizQuestion();
+
+                } catch (err) {
+                    addMessage(`❌ Quiz error: ${err.message}`, "ai", null, "System");
+                } finally {
+                    btn.disabled = false;
+                    btn.innerText = "❓ Quiz Me on this Topic";
+                }
+            };
+
+            function showQuizQuestion() {
+                const quiz = currentQuizData[currentQuizIndex];
+                
+                document.getElementById('chat-window').style.display = 'none';
+                document.getElementById('node-actions').style.display = 'none';
+                document.getElementById('chat-input-container').style.display = 'none';
+                
+                const container = document.getElementById('quiz-container');
+                container.style.display = 'flex';
+                
+                document.getElementById('quiz-progress').innerText = `Question ${currentQuizIndex + 1} of ${QUIZ_LENGTH}`;
+                document.getElementById('quiz-score').innerText = `Score: ${currentQuizScore}`;
+                document.getElementById('quiz-question').innerText = quiz.question;
+                
+                const nextBtn = document.getElementById('next-quiz-btn');
+                nextBtn.style.display = 'none';
+                nextBtn.disabled = true; // [FIX-UX-03] Timer guard
+                
+                const optionsDiv = document.getElementById('quiz-options');
+                optionsDiv.innerHTML = '';
+                
+                Object.entries(quiz.options).forEach(([key, text]) => {
+                    const optBtn = document.createElement('button');
+                    optBtn.className = 'btn btn-secondary';
+                    optBtn.style.textAlign = 'left';
+                    optBtn.style.padding = '10px';
+                    optBtn.innerHTML = `<b>${key}:</b> ${text}`;
+                    optBtn.onclick = () => {
+                        // Disable all buttons after choice
+                        Array.from(optionsDiv.children).forEach(b => b.disabled = true);
+                        
+                        const feedback = document.getElementById('quiz-feedback');
+                        feedback.style.display = 'block';
+                        if (key === quiz.answer) {
+                            currentQuizScore++;
+                            feedback.style.background = 'rgba(16, 185, 129, 0.2)';
+                            feedback.style.border = '1px solid #10b981';
+                            feedback.innerHTML = `✅ <b>Correct!</b><br>${quiz.explanation}`;
+                        } else {
+                            feedback.style.background = 'rgba(239, 68, 68, 0.2)';
+                            feedback.style.border = '1px solid #ef4444';
+                            feedback.innerHTML = `❌ <b>Incorrect.</b> The correct answer was ${quiz.answer}.<br>${quiz.explanation}`;
+                        }
+                        
+                        document.getElementById('quiz-score').innerText = `Score: ${currentQuizScore}`;
+                        nextBtn.style.display = 'block';
+                        if (currentQuizIndex === QUIZ_LENGTH - 1) {
+                            nextBtn.innerText = "Finish Quiz";
+                        } else {
+                            nextBtn.innerText = "Next Question";
+                        }
+
+                        // [FIX-UX-03] 2-second pedagogical delay for wrong answers
+                        if (key !== quiz.answer) {
+                            nextBtn.innerText = "Wait... (2s)";
+                            setTimeout(() => {
+                                nextBtn.disabled = false;
+                                nextBtn.innerText = currentQuizIndex === QUIZ_LENGTH - 1 ? "Finish Quiz" : "Next Question";
+                            }, 2000);
+                        } else {
+                            nextBtn.disabled = false;
+                        }
+                    };
+                    optionsDiv.appendChild(optBtn);
+                });
+                
+                document.getElementById('quiz-feedback').style.display = 'none';
+            }
+
+            document.getElementById('next-quiz-btn').onclick = async () => {
+                if (currentQuizIndex < QUIZ_LENGTH - 1) {
+                    currentQuizIndex++;
+                    showQuizQuestion();
+                } else {
+                    // Finalize and POST result [UX-10]
+                    const finalScore = currentQuizScore / QUIZ_LENGTH;
+                    
+                    // [FIX-UX-07] Qualitative Mastery Labels
+                    let label = "Needs More Practice 📖";
+                    if (finalScore > 0.33) label = "Developing 🌱";
+                    if (finalScore > 0.67) label = "Mastered ⭐";
+
+                    try {
+                        await fetch('/api/quiz/result', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                node_id: window.selectedNode.id,
+                                score: finalScore
+                            })
+                        });
+                        addMessage(`🎓 Quiz completed for <b>${window.selectedNode.id}</b>!<br>Score: <b>${currentQuizScore}/${QUIZ_LENGTH}</b> — <b>${label}</b>.<br>Mastery updated in the graph.`, "ai", null, "System");
+                        loadGraphData();
+                    } catch(e) {}
+                    
+                    document.getElementById('quiz-container').style.display = 'none';
+                    document.getElementById('chat-window').style.display = 'flex';
+                    document.getElementById('node-actions').style.display = 'flex';
+                    document.getElementById('chat-input-container').style.display = 'flex';
+                }
+            };
+
+            document.getElementById('close-quiz').onclick = () => {
+                document.getElementById('quiz-container').style.display = 'none';
+                document.getElementById('chat-window').style.display = 'flex';
+                document.getElementById('node-actions').style.display = 'flex';
+                document.getElementById('chat-input-container').style.display = 'flex';
+            };
+
+            async function checkStatus() {
+                try {
+                    const resp = await fetch('/api/status');
+                    const state = await resp.json();
+                    
+                    if (state.running) {
+                        const btn = document.getElementById('process-btn');
+                        btn.disabled = true;
+                        addMessage(`🔄 Resuming observation of active pipeline...`, "ai", null, "System");
+                        
+                        // Populate chat with existing logs if it's the first time
+                        if (state.log && state.log.length > 0) {
+                            state.log.forEach(line => {
+                                if (line.startsWith("▶") || line.startsWith("✅") || line.startsWith("❌")) {
+                                    addMessage(line, "ai", null, "System");
+                                }
+                            });
+                        }
+                        
+                        startPolling();
+                    }
+                } catch (err) {
+                    console.error("Status check failed", err);
+                }
+            }
+
+            function startPolling() {
+                const btn = document.getElementById('process-btn');
+                let lastStep = "";
+                const interval = setInterval(async () => {
+                    try {
+                        const resp = await fetch('/api/status');
+                        const state = await resp.json();
+
+                        if (state.step !== lastStep) {
+                            addMessage(`⏳ ${state.step}`, "ai", null, "System");
+                            lastStep = state.step;
+                        }
+
+                        if (!state.running) {
+                            clearInterval(interval);
+                            if (state.error) {
+                                addMessage(`❌ Error: ${state.error}`, "ai", null, "System");
+                                btn.disabled = false;
+                            } else {
+                                addMessage("✅ Done! Reloading graph...", "ai", null, "System");
+                                loadGraphData();
+                                btn.disabled = false;
+                                // [FIX-UX-02] Clear staleness warning on completion
+                                document.getElementById('staleness-banner').style.display = 'none';
+                                // [FIX-UX-08] Refresh inspector if node selected
+                                if (window.selectedNode) {
+                                    handleSelection({ nodes: [window.selectedNode.id], edges: [] });
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Polling error:", err);
+                        clearInterval(interval);
+                        btn.disabled = false;
+                    }
+                }, 2000);
+            }
+
+            // Settings Persistence [UX-09]
+            const eli5Toggle = document.getElementById('eli5-toggle');
+            eli5Toggle.checked = localStorage.getItem('eli5_mode') === 'true';
+            eli5Toggle.onchange = () => localStorage.setItem('eli5_mode', eli5Toggle.checked);
+
+            // Focus & Path Buttons
+            document.getElementById('focus-btn').onclick = () => {
+                focusMode = !focusMode;
+                const btn = document.getElementById('focus-btn');
+                btn.innerText = focusMode ? "🔍 Focus Mode: ON" : "🔍 Focus Mode: OFF";
+                btn.style.background = focusMode ? "#6d28d9" : "#8b5cf6";
+                if (focusMode && !window.selectedNode) {
+                    addMessage("💡 Select a node first to focus on its neighborhood.", "ai", null, "System");
+                }
+                applyFilters();
+            };
+
+            document.getElementById('path-btn').onclick = () => {
+                const allNodes = nodes.get().sort((a,b) => (a.study_rank || 0) - (b.study_rank || 0));
+                let pathInfo = "<b>Study Path (Topological):</b><br>";
+                allNodes.forEach((n, i) => {
+                    pathInfo += `${i+1}. ${n.id} (${n.study_rank_display})<br>`;
+                });
+                addMessage(pathInfo, "ai", null, "System");
+                
+                // Visually emphasize the path
+                const pathEdges = edges.get().filter(e => e.rel_type === "PREREQUISITE");
+                edges.update(pathEdges.map(e => ({ id: e.id, width: 5, color: { color: "#f59e0b" } })));
+                setTimeout(() => {
+                    edges.update(pathEdges.map(e => ({ id: e.id, width: 3, color: { color: "#f59e0b" } })));
+                }, 2000);
+            };
+
+            // Detailed Clear Confirmation [UX-06]
+            document.getElementById('clear-btn').onclick = async () => { 
+                const confirmation = confirm("⚠️ CRITICAL ACTION: This will permanently delete ALL uploaded PDFs and the entire concept graph, including your manual edits and mastery data. This cannot be undone.\n\nAre you absolutely sure you want to proceed?");
+                if(confirmation) { 
+                    await fetch('/api/clear', {method:'POST'}); 
+                    loadGraphData(); 
+                    addMessage("🧹 All data cleared. Ready for fresh extraction.", "ai", null, "System");
+                } 
+            };
+            document.getElementById('tab-inspector').onclick = () => switchTab('inspector');
+            document.getElementById('tab-pdf').onclick = () => switchTab('pdf');
+            document.getElementById('split-view-btn').onclick = () => {
+                const panel = document.getElementById('right-panel');
+                const btn = document.getElementById('split-view-btn');
+                panel.classList.toggle('split-view');
+                if (panel.classList.contains('split-view')) {
+                    btn.innerText = "◫ Single View";
+                    btn.style.background = "#6d28d9";
+                    document.getElementById('tab-inspector').style.visibility = 'hidden';
+                    document.getElementById('tab-pdf').style.visibility = 'hidden';
+                } else {
+                    btn.innerText = "◫ Split View";
+                    btn.style.background = "";
+                    document.getElementById('tab-inspector').style.visibility = 'visible';
+                    document.getElementById('tab-pdf').style.visibility = 'visible';
+                    switchTab('inspector'); // Default back to inspector
+                }
+            };
+            
+            document.getElementById('close-right-panel').onclick = () => document.getElementById('right-panel').classList.remove('open');
+            document.getElementById('ins-save-btn').onclick = saveInspectorChanges;
+            document.getElementById('ins-view-pdf-btn').onclick = () => {
+                if (!selectedItem) return;
+                let ref = "";
+                if (selectedItem.type === 'node') {
+                    const refs = selectedItem.data.page_references || [];
+                    ref = refs.length > 0 ? refs[0] : (selectedItem.data.source_ref || "");
+                } else {
+                    ref = selectedItem.data.source_ref || "";
+                }
+
+                if (ref && ref.includes(":")) {
+                    const lastColon = ref.lastIndexOf(":");
+                    const file = ref.substring(0, lastColon);
+                    const page = ref.substring(lastColon + 1);
+                    openPdf(file, parseInt(page) || 1);
+                } else {
+                    alert("No valid PDF citation found for this item.");
+                }
+            };
+            document.getElementById('clear-chat-btn').onclick = async () => {
+                const targetNodeId = window.selectedNode ? window.selectedNode.id : "global";
+                // [FIX-UX-01] Persistent Clear History via DELETE API
+                const confirmation = confirm(`Clear all chat history for "${targetNodeId}"? This cannot be undone.`);
+                if (confirmation) {
+                    try {
+                        const resp = await fetch(`/api/chat/history/${encodeURIComponent(targetNodeId)}`, { method: 'DELETE' });
+                        if (resp.ok) {
+                            nodeChatHistories.set(targetNodeId, []);
+                            document.getElementById('chat-window').innerHTML = `<div class="message ai"><span class="ai-label">Local Assistant (Ollama)</span>History cleared for <b>${targetNodeId}</b>. How can I help?</div>`;
+                        } else {
+                            alert("Failed to clear history on server.");
+                        }
+                    } catch (err) {
+                        alert("Error: " + err.message);
+                    }
+                }
+            };
+
+            // Chat
+            const handleSend = () => { const q = document.getElementById('chat-input').value; if(q) { aiChatRequest('general', {query:q}); document.getElementById('chat-input').value=''; } };
+            document.getElementById('send-btn').onclick = handleSend;
+            document.getElementById('chat-input').onkeypress = (e) => { if(e.key==='Enter') handleSend(); };
+        };
+    </script>
+</body>
+</html>

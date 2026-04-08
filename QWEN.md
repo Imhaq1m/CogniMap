@@ -8,73 +8,46 @@ Universal AI Coding Agent Instructions
 
 ## 📅 Latest Updates (April 7, 2026 — Night)
 
-### ✅ Phase 2 Complete: PDF Upload + Level 1 (Remember) — Fully Tested
-- **PDF Extraction Tested:** `test_pdf_extraction.py` successfully extracts 8 concepts from CSCI 4340 PDF
-- **Level 1 UI Complete:** Click node → type definition → AI validates → ✅/🔄 feedback
-- **Quiz System:** MCQ generation after 3+ verified nodes, ≥80% gate → unlock Level 2
-- **Reset Button:** 🔄 button in nav bar clears all progress without server restart
-- **Audit Log Viewer:** 📋 button (or Ctrl+Shift+D) shows Audit Log, LLM Calls, Nodes tabs
-- **Auto-Test Script:** `auto_test_level1.py` tests full Level 1 flow end-to-end
-- **Bug Fixes:** Right panel loads properly, nodes render as circles, `overflow: hidden` on graph
+### ✅ Phase 1 Complete: UI Redesign + Level 1 Quiz System
+- **Dark Theme UI:** 3-panel layout (Sidebar + Graph Canvas + Right Panel)
+- **Centered Review Panel:** Modal overlay for concept selection with backdrop blur
+- **Hierarchy Support:** Main Topics (Layer 1) → Sub-topics (Layer 2) with selectable checkboxes
+- **Level 1 Quiz (Remember):** Definition → Concept name matching (4 options, 80% pass threshold)
+- **Database Layer Tracking:** SQLite with `database.py` (concept_nodes, quiz_attempts, bloom_progress tables)
+- **Progress Persistence:** Quiz scores saved, layer progression tracked, retry with reshuffle
+- **PDF Extraction:** PyPDF2 + LM Studio (Docling experiment abandoned due to 3-5 min first-run time)
+- **Bug Fixes:** Duplicate node IDs in vis.js, white screen after confirmation, centered panel layout
 
-### ✅ Test Database Isolation Fixed (89/89 Passing)
-- **Problem:** Flask app ignored `TEST_DB_PATH`, tests leaked state between runs
-- **Solution:** Created `db_wrapper.py` wrapper; updated all Flask test imports
-- **Enhanced `conftest.py`:** Full table reset (nodes, edges, audit_logs, consent) between tests
-- **Result:** 89/89 tests passing (100%) — 70 existing + 19 new Level 1 tests
-
-### Files Created for v2.0
-- `app_flask.py` — Flask application with auth, consent, graph, level routes (25+ routes)
-- `db_wrapper.py` — Database wrapper for test isolation (respects TEST_DB_PATH)
-- `templates/index.html` — Single-page app (login, consent, PDF upload, graph, quiz modal, debug panel)
-- `static/css/style.css` — Clean, minimal design (~600 lines with debug panel styles)
-- `static/js/app.js` — Client-side logic (~1000 lines with debug panel, reset, audit viewer)
-- `static/lib/vis-9.1.2/` — vis.js library for interactive graph visualization
-- `test_pdf_extraction.py` — Direct LM Studio PDF extraction test (no Flask needed)
-- `auto_test_level1.py` — Full Level 1 automated test script
-
-### TDD Tests (89 total)
-- `tests/test_flask_auth.py` — 21 tests (login, logout, session, auth enforcement)
-- `tests/test_flask_consent.py` — 12 tests (consent recording, flow, state)
-- `tests/test_flask_graph.py` — 17 tests (graph CRUD, visualization, edge cases)
-- `tests/test_flask_progress.py` — 20 tests (progress retrieval, level completion)
-- `tests/test_flask_level1.py` — 19 tests (PDF upload, definition validation, quiz gate)
-- **Results:** 89/89 passing (100%)
-
-### Research Components Archived
-- **Archived:** Pre/post tests, SUS + NASA-TLX questionnaires
-- **Location:** `archive/` directory with README explaining restoration
-- **Reason:** Focus on core learning system development before data collection phase
-- **Impact:** Streamlined navigation; no pre-test prerequisite for development
-
-### Model: Gemma 4 E4B Uncensored
-- **Previous:** Llama 3.1 8B (Q4_K_M) → Qwen3.5 4B
-- **Current:** Gemma 4 E4B Uncensored (hauhaucs-aggressive)
-- **Reason:** Better instruction-following, faster response times
-- **Files Updated:** `llm_utils.py`, `QWEN.md`, `AGENTS.md`
-
-### 6-Level Bloom's Taxonomy Implementation Complete
-- **All 6 levels implemented:** Remember, Understand, Apply, Analyze, Evaluate, Create
-- **Hierarchical scaffolding:** Layer 1 (Main Headings) → Layer 2 (Subheadings)
-- **Database extended:** 12 tables with layer support, scenario tracking, error injection, export artifacts, audit logs
-- **Test coverage:** 39/39 database tests passing (100%)
-
-### Demo Mode Added for Testing
-- **`setup_demo.py`** — One-time setup to unlock all levels for P01
-- **`pages/00_demo.py`** — Landing page to jump to any level directly
-- **Purpose:** Test CogniMap learning system without research overhead (pre-test, post-test, questionnaires)
+### Files Created for v2.0 (Current)
+- `app_flask.py` — Flask backend with quiz generation, submission, progress tracking
+- `database.py` — SQLite schema with layer tracking, quiz attempts, Bloom progress
+- `concept_extractor_pypdf2.py` — PDF text extraction using PyPDF2
+- `concept_extractor_docling.py` — (Archived) Docling-based extraction, not used
+- `pipeline_state.py` — Background task progress tracking with FileLock
+- `templates/index.html` — Dark theme 3-panel UI with centered review modal
+- `static/css/style.css` — Dark theme styles (~800 lines)
+- `static/js/app.js` — Client-side logic with quiz system, tree rendering, vis.js
+- `static/lib/vis-9.1.2/` — vis.js graph visualization
+- `static/lib/tom-select/` — Dropdown library for search/filters
 
 ### Current Status (April 7, 2026 — Night)
-**Phase 2 Complete ✅**
-- Database: ✅ All 12 tables, 50+ helper functions
-- LLM Utils: ✅ All 6 level functions with Gemma 4 E4B
-- Graph Utils: ✅ NetworkX + vis.js visualization
-- API: ✅ 25+ Flask routes (auth, consent, graph, levels 1-3, PDF, audit logs, reset)
-- UI: ✅ Single-page app (login, consent, PDF upload, graph, quiz, debug panel)
-- Tests: ✅ 89/89 passing (100%)
-- Phase 2: ✅ PDF upload, Level 1 validation, quiz gate
-- Testing: ✅ `test_pdf_extraction.py` verified (8 concepts extracted from CSCI 4340 PDF)
-- Archived: Pre/post tests, SUS, NASA-TLX (see `archive/README.md`)
+**Phase 1 Complete ✅**
+- UI: ✅ Dark theme, 3-panel layout, centered review modal
+- Hierarchy: ✅ Main topics → Sub-topics with selectable checkboxes
+- Level 1: ✅ Quiz (Definition → Concept matching), ≥80% pass threshold
+- Database: ✅ SQLite with layer tracking, quiz attempts, progress
+- PDF Extraction: ✅ PyPDF2 + LM Studio (gemma-4-e4b-uncensored-hauhaucs-aggressive)
+- Progress: ✅ Retry with reshuffle, layer progression (Layer 1 → Layer 2)
+- Next: Level 2 (Understand) — Paraphrase + semantic similarity check
+
+### Architecture Changes
+| Component | Old | New |
+|-----------|-----|-----|
+| Extraction | LLM-only | PyPDF2 text + LLM hierarchy |
+| Quiz | Placeholder | Definition→Concept matching with database tracking |
+| UI | Light theme, full-width panels | Dark theme, centered modal overlay |
+| Database | JSON only | SQLite with layer/progress tracking |
+| Hierarchy | Flat list | Main Topics → Sub-topics with checkboxes |
 
 ---
 1. Project Overview
@@ -115,113 +88,65 @@ Pre/post tests measure actual learning gain; SUS + NASA-TLX measure usability an
 2. Tech Stack
 Understand this before touching any file. Every tool was chosen deliberately.
 
-### CogniMap v2.0 (Current Development)
+### Tech Stack (Current v2.0)
 | Layer | Tool | Version | Why |
 |---|---|---|---|
-| Frontend | HTML5 + vis.js | 9.1.2 | Interactive graph, single-page app, no reloads |
-| Backend API | Flask | 3.0+ | Lightweight, simple, session management built-in |
-| Graph Visual | vis.js | 9.1.2 | Drag, zoom, click, edit nodes/edges |
-| LLM Runtime | LM Studio | latest | GUI-based local LLM server, free, works offline |
-| LLM Model | Gemma 4 E4B Uncensored | — | Fits 8GB RAM, fast, excellent instruction-following |
-| Graph Core | NetworkX | 3.2.1 | JSON-serializable, integrates with vis.js |
-| Relational DB | SQLite (built-in) | — | Single file, zero setup, easy backup |
-| Embeddings | sentence-transformers | 2.6.1 | all-MiniLM-L6-v2, 80MB, CPU-friendly, offline |
-| PDF Reading | PyPDF2 | 3.0.1 | Extract text from student-uploaded documents |
-| Testing | pytest | 8.0+ | TDD workflow, coverage reports |
-
-### Legacy System (Streamlit — Still Functional)
-| Layer | Tool | Version | Why |
-|---|---|---|---|
-| Frontend | Streamlit | 1.32.0 | Python-only, no HTML/CSS needed, renders in browser |
-| Backend API | FastAPI | 0.110.0 | Auto API docs, Pydantic validation, enforces state machine |
-| Graph Visual | pyvis | 0.3.2 | Interactive HTML graphs, embeddable in Streamlit |
-
-### Ports (All Localhost)
-- `http://localhost:5000` — Flask v2.0 frontend (NEW)
-- `http://localhost:8501` — Streamlit frontend (legacy)
-- `http://localhost:8000` — FastAPI backend (legacy)
-- `http://localhost:1234` — LM Studio local server
-
-### How Components Talk (v2.0)
-```
-Student (Browser) → Flask app_flask.py
-  → LM Studio (LLM calls via REST)
-  → SQLite (structured data)
-  → NetworkX (graph, persisted as JSON)
-  → vis.js (interactive visualization)
-```
+| Frontend | HTML5 + CSS3 + Vanilla JS | — | Dark theme, no frameworks |
+| Backend API | Flask | 3.0+ | Lightweight, session management |
+| Graph Visual | vis.js | 9.1.2 | Interactive node/edge canvas |
+| LLM Runtime | LM Studio | latest | Local LLM server, offline |
+| LLM Model | Gemma 4 E4B Uncensored | — | 8GB RAM friendly, fast |
+| PDF Reading | PyPDF2 | 3.0.1 | Text extraction from PDFs |
+| Database | SQLite | — | Single file, zero setup |
+| File Locking | filelock | 3.13+ | Safe concurrent access |
+| Testing | pytest | 8.0+ | TDD workflow |
 ---
 3. Project Folder Structure
 Create this exact structure before writing feature code. Do not rename files — the rest of this document references them by name.
 ```
 cognimap-fyp/
-├── app.py                      # Streamlit frontend entry point (legacy)
-├── app_flask.py                # Flask v2.0 single-page app (NEW)
-├── api.py                      # FastAPI backend (all routes here)
-├── database.py                 # All SQLite operations (50+ functions)
-├── graph_utils.py              # NetworkX graph operations
-├── llm_utils.py                # LM Studio calls + ChromaDB RAG
-├── setup_demo.py               # One-time demo setup script
-├── requirements.txt            # Python dependencies (UPDATED with Flask)
-├── .gitignore                  # Excludes venv/, *.db, chroma_db/, *.json
-├── README.md                   # Setup instructions (must work for a stranger)
-├── run.sh                      # One-command launcher (Mac/Linux)
+├── app_flask.py                # Flask backend (quiz, progress, extraction routes)
+├── database.py                 # SQLite operations (concept_nodes, quiz_attempts, bloom_progress)
+├── concept_extractor_pypdf2.py # PDF extraction using PyPDF2 + LM Studio
+├── concept_extractor_docling.py # (Archived) Docling-based extraction, not used
+├── pipeline_state.py           # Background task progress tracking with FileLock
+├── requirements.txt            # Python dependencies (flask, PyPDF2, filelock, etc.)
+├── .gitignore                  # Excludes venv/, *.db, __pycache__/, etc.
+├── README.md                   # Setup instructions
 ├── run.bat                     # One-command launcher (Windows)
 ├── .streamlit/
-│   └── config.toml             # Streamlit theme configuration
-├── archive/                    # 📦 Research components (for future use)
-│   ├── README.md               # Explains what's archived and how to restore
-│   ├── test_system.py          # Pre/post test questions (18 questions)
-│   ├── scoring_utils.py        # SUS + NASA-TLX scoring functions
-│   ├── 02_pretest.py           # 18-question pre-test UI
-│   ├── 09_posttest.py          # 18-question post-test UI
-│   ├── 10_questionnaires.py    # SUS + NASA-TLX forms
-│   └── test_scoring.py         # Scoring utility tests
-├── static/                     # 🆕 Flask v2.0 static assets
+│   └── config.toml             # Streamlit theme (legacy)
+├── static/                     # Flask v2.0 static assets
 │   ├── css/
-│   │   └── style.css           # Clean, minimal design
+│   │   └── style.css           # Dark theme styles (~800 lines)
 │   ├── js/
-│   │   └── app.js              # Client-side app logic
+│   │   └── app.js              # Client-side logic (quiz, tree, vis.js)
 │   └── lib/
-│       └── vis-9.1.2/          # vis.js graph visualization library
-├── templates/                  # 🆕 Flask v2.0 HTML templates
-│   └── index.html              # Single-page app shell
-├── pages/                      # Streamlit multi-page app (legacy)
-│   ├── 00_demo.py              # Demo landing page (skip research parts)
-│   ├── 01_consent.py           # Digital consent form
-│   ├── 03_level1_remember.py   # Concept definition + AI validation
-│   ├── 04_level2_understand.py # Paraphrase + semantic similarity
-│   ├── 05_level3_apply.py      # Scenario-based application
-│   ├── 06_level4_analyze.py    # Graph canvas + edge defense
-│   ├── 07_level5_evaluate.py   # Error hunting mode
-│   └── 08_level6_create.py     # Export module
-├── tests/                      # Unit tests
-│   ├── conftest.py             # Shared fixtures (ENHANCED: full table reset)
-│   ├── db_wrapper.py           # Database wrapper for test isolation
-│   ├── test_database.py        # Database operations tests
-│   ├── test_database_extended.py # Extended DB tests (layers, scenarios)
-│   ├── test_gates.py           # Level gate enforcement tests
-│   ├── test_llm_utils.py       # LLM function tests (mocked)
-│   ├── test_graph_utils.py     # Graph operation tests
-│   ├── test_flask_auth.py      # ✅ Flask auth tests (21 tests)
-│   ├── test_flask_consent.py   # ✅ Flask consent tests (12 tests)
-│   ├── test_flask_graph.py     # ✅ Flask graph tests (17 tests)
-│   ├── test_flask_progress.py  # ✅ Flask progress tests (20 tests)
-│   └── test_flask_level1.py    # ✅ Level 1 PDF/Validation/Quiz (19 tests)
-├── backups/                    # Auto-created by run.sh; never commit
-└── docs/
-    ├── thesis/
-    └── diagrams/
+│       ├── vis-9.1.2/          # vis.js graph visualization
+│       └── tom-select/         # Dropdown library
+├── templates/
+│   └── index.html              # Dark theme 3-panel UI with centered modal
+├── data/                       # Uploaded PDFs + SQLite database
+├── output/                     # Extracted concepts cache, graph data, status
+├── uploads/                    # Legacy upload folder (can be removed)
+├── backups/                    # Auto-created database backups
+├── venv/                       # Virtual environment (gitignored)
+├── References/                 # Reference implementation from another project
+│   ├── app.py                  # Flask app from References
+│   ├── lib/                    # vis.js, tom-select (source for copying)
+│   └── scripts/                # Extraction, build, validation scripts
+└── images_problem/             # Screenshots for debugging
 ```
 ---
 4. Environment Setup
-Complete these in order. Each step unlocks the next. Estimated time: 3–4 hours on a fresh machine.
-Step 1 — Python 3.11
+Complete these in order. Each step unlocks the next. Estimated time: 30 minutes on a fresh machine.
+
+### Step 1 — Python 3.13
 ```bash
-python --version  # Must show 3.11.x or 3.12.x
-# Download from python.org if needed (3.11 preferred — better wheel support)
+python --version  # Must show 3.13.x
 ```
-Step 2 — Virtual Environment
+
+### Step 2 — Virtual Environment
 ```bash
 cd cognimap-fyp
 python -m venv venv
@@ -234,324 +159,139 @@ source venv/bin/activate
 
 # You should see (venv) at the start of your prompt
 ```
-Step 3 — Install LM Studio + Model
+
+### Step 3 — Install LM Studio + Model
 ```bash
 # 1. Download LM Studio from lmstudio.ai for your OS
-# 2. Open LM Studio GUI → Search for "gemma-4-e4b-uncensored-hauhaucs-aggressive" → Download the model
+# 2. Open LM Studio GUI → Search for "gemma-4-e4b-uncensored-hauhaucs-aggressive" → Download
 # 3. In LM Studio: Go to Local Server tab → Click "Start Server" (keep LM Studio open)
-# 4. Test it responds under 10 seconds via API:
+# 4. Test it responds under 10 seconds:
 curl http://localhost:1234/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"gemma-4-e4b-uncensored-hauhaucs-aggressive","messages":[{"role":"user","content":"Say hello in one sentence"}]}'
 ```
-Step 4 — requirements.txt
-Create this file in the project root exactly as shown (using >= for Python 3.13 compatibility):
-```
-# Core web framework (v2.0)
-flask>=3.0.0
-flask-cors>=4.0.0
 
-# Backend utilities
-httpx>=0.27.0
-pydantic>=2.6.0
-
-# LLM + AI
-sentence-transformers>=2.6.1
-PyPDF2>=3.0.1
-
-# Graph operations
-networkx>=3.2.1
-
-# Data handling
-pandas>=2.2.0
-scipy>=1.12.0
-python-dotenv>=1.0.0
-filelock>=3.13.0
-
-# Testing
-pytest>=8.0.0
-pytest-cov>=4.1.0
-
-# LEGACY (Streamlit/FastAPI - no longer primary)
-# streamlit>=1.32.0
-# fastapi>=0.110.0
-# uvicorn>=0.27.1
-# pyvis>=0.3.2
-# chromadb>=0.4.24
-```
+### Step 4 — Install Dependencies
 ```bash
 pip install -r requirements.txt
-# Takes 5–10 minutes — sentence-transformers is large
+# Fast install — no heavy ML libraries needed
 ```
-Step 5 — Streamlit Theme
-Create `.streamlit/config.toml`:
-```toml
-[theme]
-primaryColor = '#2E86AB'
-backgroundColor = '#FFFFFF'
-secondaryBackgroundColor = '#EBF4F8'
-textColor = '#1A1A1A'
-font = 'sans serif'
+
+### Step 5 — Run Flask App
+```bash
+python app_flask.py
+# Visit http://localhost:5000
 ```
-Step 6 — Git
+
+### Step 6 — Git
 ```bash
 git init
-echo "venv/ *.db chroma_db/ *.json __pycache__/ .env backups/" > .gitignore
+echo "venv/ *.db __pycache__/ .env backups/ data/*.db output/*.json" > .gitignore
 git add .
 git commit -m "Initial project setup"
-# Push to a private GitHub repo — do this NOW before writing any code
-```
-Step 7 — Verify Everything Works
-```bash
-# Terminal 1: LM Studio server (start via GUI, then verify)
-curl http://localhost:1234/v1/models  # Should return model list
-
-# Terminal 2: FastAPI (creates a blank api.py first)
-uvicorn api:app --reload --port 8000
-# Visit http://localhost:8000/docs — should show Swagger UI
-
-# Terminal 3: Streamlit (creates a blank app.py first)
-streamlit run app.py
-# Visit http://localhost:8501 — should show app
+# Push to a private GitHub repo
 ```
 ---
 5. Database Schema
-database.py owns all SQLite operations. No other file writes to the database directly — they call functions from database.py.
+`database.py` owns all SQLite operations. No other file writes to the database directly.
 
-### Core Tables (12 total)
+### Core Tables (3 total)
 ```sql
-CREATE TABLE IF NOT EXISTS participants (
-    id INTEGER PRIMARY KEY,
-    code TEXT UNIQUE NOT NULL,         -- P01 through P10
-    consent_given INTEGER DEFAULT 0,   -- 0=no, 1=yes
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS bloom_progress (
-    participant_id INTEGER,
-    layer INTEGER DEFAULT 1,                   -- 1=Main Headings, 2=Subheadings
-    level INTEGER,                             -- 1=Remember through 6=Create
-    status TEXT DEFAULT 'locked',              -- locked | active | complete
-    unlocked_at TEXT,
-    completed_at TEXT,
-    PRIMARY KEY (participant_id, layer, level)
-);
-
-CREATE TABLE IF NOT EXISTS test_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER,
-    test_type TEXT,                    -- 'pre' or 'post'
-    score REAL,                        -- percentage 0-100
-    bloom_level_scores TEXT,           -- JSON: {"1": 80, "2": 60, ...}
-    taken_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS concept_nodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER,
-    layer INTEGER DEFAULT 1,
-    concept TEXT NOT NULL,
-    definition TEXT NOT NULL,
-    source_text TEXT,                          -- Original text snippet from PDF
-    is_candidate INTEGER DEFAULT 1,            -- 1=AI-extracted, 0=Student-created
-    verification_status TEXT DEFAULT 'pending',-- pending | verified | rejected
-    validation_result TEXT,                    -- VALID | NEEDS_REVISION
-    similarity_score REAL,                     -- For Level 2 paraphrase check
+    participant_id TEXT DEFAULT 'P01',
+    layer INTEGER DEFAULT 1,              -- 1=Main Topics, 2=Sub-topics
+    concept_type TEXT DEFAULT 'main_topic', -- main_topic or sub_topic
+    name TEXT NOT NULL,
+    definition TEXT,
+    verified INTEGER DEFAULT 0,           -- 1=passed quiz, 0=pending
+    source TEXT,                          -- PDF filename
+    page INTEGER,                         -- Page number in PDF
     revision_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS concept_edges (
+CREATE TABLE IF NOT EXISTS quiz_attempts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER,
-    layer INTEGER DEFAULT 1,
-    from_node TEXT NOT NULL,
-    to_node TEXT NOT NULL,
-    edge_label TEXT,                           -- e.g., "Causes", "Related to"
-    justification TEXT,
-    evidence_text TEXT,                        -- Source text supporting the edge
-    adversarial_challenge TEXT,                -- AI's Socratic challenge
-    defense_response TEXT,                     -- Student's defense
-    defended_at TEXT,                          -- NULL until student defends
-    is_validated INTEGER DEFAULT 0,            -- 1=AI validated, 0=pending
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS llm_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER,
-    layer INTEGER,                             -- 1 or 2
-    level INTEGER,                             -- 1-6
-    feature TEXT,                              -- e.g. 'ner_extraction', 'edge_challenger'
-    prompt TEXT,
-    response TEXT,
-    response_time_ms INTEGER,
-    metadata TEXT,                             -- JSON for additional context
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS scenario_responses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER,
-    layer INTEGER DEFAULT 1,
-    scenario_text TEXT NOT NULL,
-    selected_nodes TEXT,                       -- JSON array of selected concept IDs
-    is_correct INTEGER DEFAULT 0,
-    attempts INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS error_injections (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER,
-    error_type TEXT NOT NULL,                  -- 'wrong_node' | 'wrong_edge' | 'wrong_definition'
-    target_id INTEGER NOT NULL,                -- node_id or edge_id
-    original_value TEXT,                       -- Original correct value
-    injected_value TEXT,                       -- Injected wrong value
-    is_detected INTEGER DEFAULT 0,             -- 1=student found it, 0=not found
-    detected_at TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS export_artifacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER,
-    export_type TEXT NOT NULL,                 -- 'quiz' | 'study_guide' | 'essay_outline'
-    ai_draft TEXT,
-    user_edits TEXT,                           -- JSON of user modifications
-    utility_score REAL,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER,
-    layer INTEGER,
-    level INTEGER,
-    action TEXT NOT NULL,                      -- e.g., 'node_verified', 'edge_defended'
-    details TEXT,                              -- JSON with action-specific data
+    participant_id TEXT DEFAULT 'P01',
+    layer INTEGER DEFAULT 1,              -- 1 or 2
+    level INTEGER DEFAULT 1,              -- 1=Remember through 6=Create
+    score REAL NOT NULL,                  -- 0.0 to 1.0
+    total_questions INTEGER NOT NULL,
+    passed INTEGER DEFAULT 0,             -- 1=≥80%, 0=<80%
+    questions_json TEXT,                  -- JSON of quiz questions
+    responses_json TEXT,                  -- JSON of user responses
     timestamp TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS sus_responses (
+CREATE TABLE IF NOT EXISTS bloom_progress (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER UNIQUE,
-    q1 INTEGER, q2 INTEGER, q3 INTEGER, q4 INTEGER, q5 INTEGER,
-    q6 INTEGER, q7 INTEGER, q8 INTEGER, q9 INTEGER, q10 INTEGER,
-    total_score REAL,
-    submitted_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS nasa_tlx (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id INTEGER UNIQUE,
-    mental_demand INTEGER,             -- 1-10 scale
-    effort INTEGER,                    -- 1-10 scale
-    frustration INTEGER,               -- 1-10 scale
-    submitted_at TEXT DEFAULT (datetime('now'))
+    participant_id TEXT DEFAULT 'P01',
+    layer INTEGER DEFAULT 1,              -- 1 or 2
+    level INTEGER DEFAULT 1,              -- 1 through 6
+    status TEXT DEFAULT 'locked',         -- locked | active | complete
+    unlocked_at TEXT,
+    completed_at TEXT,
+    UNIQUE(participant_id, layer, level)
 );
 ```
-Seed Data (Run Once)
+
+### Seed Data (Run Once)
 ```python
-# In database.py — call initialize_database() from api.py startup
-def seed_participants():
-    """Insert participant codes P01–P10 if not already present."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    for i in range(1, 11):
-        code = f"P{i:02d}"  # P01, P02, ..., P10
-        cursor.execute(
-            "INSERT OR IGNORE INTO participants (code) VALUES (?)", (code,)
-        )
-        # Initialize all 3 levels as 'locked' for each participant
-        participant_id = cursor.execute(
-            "SELECT id FROM participants WHERE code = ?", (code,)
-        ).fetchone()[0]
-        for level in range(1, 4):
-            cursor.execute(
-                "INSERT OR IGNORE INTO bloom_progress (participant_id, level, status) VALUES (?, ?, ?)",
-                (participant_id, level, 'locked' if level > 1 else 'active')
-            )
-    conn.commit()
-    conn.close()
+# In database.py — called on module import
+def initialize_database():
+    """Create tables and seed initial data."""
+    # Layer 1, Level 1 is 'active' for P01
+    cursor.execute("""
+        INSERT OR IGNORE INTO bloom_progress 
+        (participant_id, layer, level, status, unlocked_at)
+        VALUES ('P01', 1, 1, 'active', datetime('now'))
+    """)
 ```
 ---
 6. Implementation Phases
 Build in this order. Do not jump ahead. Each phase has a clear test before moving on.
+
 ---
-Phase 1 — Infrastructure (Week 4) ✅ COMPLETE
-Goal: All three servers start. Login works. Database exists.
-Files created: `database.py`, `api.py`, `app.py`, `pages/01_consent.py` (moved to Phase 2)
-Test results:
-[x] `uvicorn api:app --reload` starts with no errors
-[x] `streamlit run app.py` shows login form
-[x] Entering `P01` logs in; entering `INVALID` shows error
-[x] SQLite file `cms_database.db` exists with 9 tables and 10 participant rows
+### Phase 1 — Infrastructure + Level 1 Quiz ✅ COMPLETE
+**Goal:** UI working, PDF upload, concept extraction, Level 1 quiz functional.
 
-Notes:
-- Python 3.13 compatible (using `>=` in requirements.txt)
-- FastAPI has 16 routes (including placeholders for future phases)
-- database.py has 18 helper functions
-- Consent form moved to Phase 2 for better organization
+**Files created:**
+- `app_flask.py` — Flask backend with quiz generation, submission, progress routes
+- `database.py` — SQLite schema with layer tracking, quiz attempts
+- `concept_extractor_pypdf2.py` — PDF text extraction using PyPDF2
+- `pipeline_state.py` — Background task progress tracking
+- `templates/index.html` — Dark theme 3-panel UI with centered modal
+- `static/css/style.css` — Dark theme styles (~800 lines)
+- `static/js/app.js` — Client-side logic with quiz system, tree rendering, vis.js
+
+**Test results:**
+- [x] Upload PDF → Extract Concepts → Tree view with checkboxes
+- [x] Select concepts → Confirm → Graph renders with blue dots
+- [x] Level 1 Quiz generates (Definition → Concept matching)
+- [x] Quiz scoring works (≥80% pass threshold)
+- [x] Retry with reshuffle on fail
+- [x] Layer progression tracked (Layer 1 → Layer 2)
+- [x] Database saves quiz attempts and progress
+
+**Notes:**
+- PyPDF2 + LM Studio for extraction (Docling abandoned due to 3-5 min first-run time)
+- Hierarchy: Main Topics (Layer 1) → Sub-topics (Layer 2)
+- Quiz format: Show definition → select matching concept name (4 options)
+- vis.js for graph visualization with unique node IDs
+- Dark theme with centered review modal overlay
+
 ---
-Phase 2 — Consent + Pre-Test (Week 5) ⚠️ PARTIALLY ARCHIVED
-Goal: Consent is stored. Pre-test component archived for future data collection.
-Files: `pages/01_consent.py` (active), `test_system.py` (archived), `pages/02_pretest.py` (archived)
-Status:
-[x] Consent page blocks access to all other pages until signed
-[ ] Pre-test ARCHIVED — moved to `archive/` directory
-[ ] Pre-test routes in api.py COMMENTED OUT with restoration markers
+### Phase 2 — Level 2: Understand 🔄 NEXT
+**Goal:** Students paraphrase definitions. Semantic similarity detects copy-paste.
 
-Notes:
-- Consent form updated to redirect to demo after signing
-- Pre/post test questions preserved in `archive/test_system.py`
-- Can be restored when ready for participant studies (see `archive/README.md`)
----
-Phase 3 — Level 1: Remember (Week 6) ✅ COMPLETE (v2.0)
-Goal: Students define concepts. AI validates without giving the answer.
-Files: `llm_utils.py`, `graph_utils.py`, `templates/index.html`, `static/js/app.js`
-Implemented:
-- PDF upload → concept extraction via LLM
-- Click node → definition textarea → AI validates (VALID/NEEDS_REVISION)
-- Quiz generation after 3+ verified nodes
-- Gate enforcement: ≥80% → unlock Level 2
-LLM Prompt for Definition Validator (critical — do not change the NEVER GIVE THE ANSWER rule):
-```python
-DEFINITION_VALIDATOR_PROMPT = """You are an educational AI assistant for CogniMap, a learning tool based on Bloom's Taxonomy.
+**Build order:**
+1. `database.py` — add Level 2 status tracking
+2. `app_flask.py` — add `POST /validate/paraphrase` route
+3. `static/js/app.js` — add paraphrase UI (original definition read-only + textarea)
+4. Use `sentence-transformers` for cosine similarity (0.85-0.95 threshold)
 
-A student is learning from their own uploaded document. They have just typed this definition of a concept in their own words.
-
-Concept: {concept}
-Student's Definition: {definition}
-
-Your job is to validate whether this definition shows genuine understanding. You MUST follow these rules:
-1. NEVER give the correct definition or the answer — that defeats the learning purpose
-2. If valid: respond with "VALID: [one sentence of specific encouragement about what they got right]"
-3. If needs revision: respond with "NEEDS_REVISION: [one specific question that guides them to think deeper, without revealing the answer]"
-4. Keep your response under 50 words
-5. Be encouraging but honest
-
-Respond now:"""
-```
-Test before moving on:
-[x] Student can upload PDF and see extracted concepts
-[x] Student can click node → type definition → AI validates
-[x] AI responds with VALID or NEEDS_REVISION in under 10 seconds
-[x] Response is logged to `llm_logs` with `response_time_ms`
-[x] Node color updates (blue=pending, green=verified)
-[x] Quiz button appears after 3+ verified nodes
-[x] Quiz generates MCQs from verified concepts
-[x] Level 1 quiz gate: scoring <80% shows "try again"; ≥80% updates `bloom_progress` Level 2 to 'active'
----
-Phase 4 — Level 2: Understand (Week 7) 🔄 NEXT
-Goal: Students paraphrase. Semantic similarity detects copy-paste.
-Files to create: `pages/04_level2_understand.py`
-Build order:
-`llm_utils.py` — add `check_paraphrase(original, paraphrase)` using sentence-transformers cosine similarity
-`api.py` — add `POST /validate/paraphrase`
-`pages/04_level2_understand.py` — show original definition (read-only), paraphrase textarea, submit
-Similarity Logic:
+**Similarity Logic:**
 ```python
 from sentence_transformers import SentenceTransformer, util
-
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def check_paraphrase(original: str, paraphrase: str) -> dict:
@@ -559,20 +299,18 @@ def check_paraphrase(original: str, paraphrase: str) -> dict:
     similarity = float(util.cos_sim(embeddings[0], embeddings[1]))
     
     if similarity > 0.95:
-        return {"result": "COPY_PASTE", "similarity": similarity,
-                "feedback": "This is too similar to the original. Use your own words."}
+        return {"result": "COPY_PASTE", "feedback": "Too similar. Use your own words."}
     elif similarity >= 0.85:
-        return {"result": "VALID", "similarity": similarity,
-                "feedback": "Good paraphrase — you've shown you understand this."}
+        return {"result": "VALID", "feedback": "Good paraphrase!"}
     else:
-        return {"result": "TOO_DIFFERENT", "similarity": similarity,
-                "feedback": "This seems off-topic from the original definition. Try again."}
+        return {"result": "TOO_DIFFERENT", "feedback": "Off-topic. Try again."}
 ```
-Test before moving on:
-[ ] Copy-pasting original definition is rejected (similarity >0.95)
-[ ] Genuine paraphrase with similarity 0.85–0.95 is accepted
-[ ] Completely unrelated text is rejected (similarity <0.85)
-[ ] Level 2 quiz gate enforced; Level 3 unlocks on pass
+
+**Test before moving on:**
+- [ ] Copy-pasting original definition rejected (similarity >0.95)
+- [ ] Genuine paraphrase accepted (0.85-0.95)
+- [ ] Unrelated text rejected (<0.85)
+- [ ] Level 2 quiz gate enforced; Level 3 unlocks on pass
 ---
 Phase 5 — Level 3: Apply + Adversarial (Week 8)
 Goal: Students connect concepts. AI challenges their justifications.

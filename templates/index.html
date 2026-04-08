@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CogniMap - AI that Scaffolds Learning</title>
+
+    <!-- Libraries -->
+    <link rel="stylesheet" href="/static/lib/vis-9.1.2/vis-network.css">
+    <link rel="stylesheet" href="/static/lib/tom-select/tom-select.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    
+    <script src="/static/lib/vis-9.1.2/vis-network.min.js"></script>
+    <script src="/static/lib/tom-select/tom-select.complete.min.js"></script>
+</head>
+<body>
+    <!-- Staleness Warning Banner -->
+    <div id="staleness-banner" style="display: none;">
+        ⚠️ Graph may be stale — source PDFs have changed. Re-run 'Extract Concepts' to update.
+    </div>
+
+    <div id="app-container">
+        <!-- ==================== SIDEBAR ==================== -->
+        <div id="sidebar">
+            <!-- Header -->
+            <div class="header">
+                <h1>🧠 CogniMap</h1>
+                <p class="tagline">AI that scaffolds learning</p>
+            </div>
+
+            <!-- Upload Section -->
+            <div class="upload-section">
+                <h3>📂 Manage PDFs</h3>
+                <div class="file-input-wrapper">
+                    <button class="btn btn-secondary">Select PDF(s)</button>
+                    <input type="file" id="pdf-upload" accept=".pdf" multiple />
+                </div>
+                <div id="upload-status" class="upload-status"></div>
+
+                <!-- File List Container -->
+                <div id="file-list" class="file-list">
+                    <div class="file-list-empty">No files uploaded</div>
+                </div>
+
+                <button id="extract-btn" class="btn">✨ Extract Concepts</button>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                CogniMap © 2026
+            </div>
+        </div>
+
+        <!-- ==================== MAIN CONTENT ==================== -->
+        <div id="main-content">
+            <!-- Backdrop for centered review panel -->
+            <div id="review-backdrop" style="display: none;" onclick="hideReviewPanel()"></div>
+
+            <!-- Concept Review Panel (centered overlay) -->
+            <div id="review-panel" style="display: none;">
+                <div class="review-header">
+                    <h2>📋 Review Extracted Concepts</h2>
+                    <p id="review-stats">0 concepts found from 0 PDFs</p>
+                    <button id="close-review-panel" class="btn-close" onclick="hideReviewPanel()">&times;</button>
+                </div>
+
+                <div id="concept-tree" class="concept-tree">
+                    <!-- Tree structure injected here by JS -->
+                </div>
+
+                <div class="review-actions">
+                    <div class="review-buttons">
+                        <button id="select-all-btn" class="btn btn-small">Select All</button>
+                        <button id="deselect-all-btn" class="btn btn-small btn-secondary">Deselect All</button>
+                    </div>
+                    <button id="confirm-btn" class="btn btn-confirm" disabled>
+                        ✅ Confirm Selection (0 concepts)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Graph Canvas -->
+            <div id="graph-container">
+                <div id="mynetwork"></div>
+                <div class="overlay-stats">
+                    <span id="node-count">0</span> Concepts | <span id="edge-count">0</span> Relationships
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== RIGHT PANEL (Hidden for now) ==================== -->
+        <div id="right-panel">
+            <div class="panel-header">
+                <span>Details</span>
+                <button id="close-right-panel" class="btn-close">&times;</button>
+            </div>
+            <div id="panel-content">
+                <p class="panel-placeholder">Panel will be populated in future phases</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== LOADING OVERLAY ==================== -->
+    <div id="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p id="loading-text">Extracting concepts...</p>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
