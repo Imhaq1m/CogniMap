@@ -1,6 +1,6 @@
 """
 CogniMap Database Module — SQLite schema and helper functions.
-Tracks concept nodes, quiz attempts, and Bloom's Taxonomy progress.
+Tracks concept nodes and Bloom's Taxonomy progression.
 """
 
 import sqlite3
@@ -40,27 +40,11 @@ def initialize_database():
             concept_type TEXT DEFAULT 'main_topic',
             name TEXT NOT NULL,
             definition TEXT,
-            verified INTEGER DEFAULT 0,
+            verified INTEGER DEFAULT 0,           -- 1=AI-validated, 0=pending
             source TEXT,
             page INTEGER,
             revision_count INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-
-    # Quiz attempts table (tracks quiz scores per layer)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS quiz_attempts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            participant_id TEXT DEFAULT 'P01',
-            layer INTEGER DEFAULT 1,
-            level INTEGER DEFAULT 1,
-            score REAL NOT NULL,
-            total_questions INTEGER NOT NULL,
-            passed INTEGER DEFAULT 0,
-            questions_json TEXT,
-            responses_json TEXT,
-            timestamp TEXT DEFAULT (datetime('now'))
         )
     """)
 
@@ -75,6 +59,19 @@ def initialize_database():
             unlocked_at TEXT,
             completed_at TEXT,
             UNIQUE(participant_id, layer, level)
+        )
+    """)
+
+    # LLM logs table (tracks every AI call for research analysis)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS llm_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            participant_id TEXT DEFAULT 'P01',
+            feature TEXT,
+            prompt TEXT,
+            response TEXT,
+            response_time_ms INTEGER,
+            created_at TEXT DEFAULT (datetime('now'))
         )
     """)
 
@@ -149,7 +146,7 @@ def get_verified_concepts(layer: int, participant_id: str = "P01"):
 
 
 def verify_concept(concept_id: int, definition: str = None):
-    """Mark a concept as verified (passed validation/quiz)."""
+    """Mark a concept as verified (passed AI validation)."""
     conn = get_connection()
     if definition:
         conn.execute("""

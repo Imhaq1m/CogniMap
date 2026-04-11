@@ -6,45 +6,52 @@ Universal AI Coding Agent Instructions
 
 ---
 
-## 📅 Latest Updates (April 7, 2026 — Night)
+## 📅 Latest Updates (April 8, 2026 — Morning)
 
-### ✅ Phase 1 Complete: UI Redesign + Level 1 Quiz System
+### ✅ Git Commit: v2.0 Architecture Pushed to `origin/main`
+- **Commit:** `559cdc7` — Refactor to CogniMap v2.0: Flask + vis.js architecture
+- **Changes:** 38 files changed, 7,831 insertions, 4,741 deletions
+- **Status:** Working tree clean, branch up to date with `origin/main`
+- **Milestone:** Complete migration from Streamlit to Flask single-page application
+
+### ✅ Phase 1 Complete: UI Redesign + Level 1 (Remember)
 - **Dark Theme UI:** 3-panel layout (Sidebar + Graph Canvas + Right Panel)
 - **Centered Review Panel:** Modal overlay for concept selection with backdrop blur
 - **Hierarchy Support:** Main Topics (Layer 1) → Sub-topics (Layer 2) with selectable checkboxes
-- **Level 1 Quiz (Remember):** Definition → Concept name matching (4 options, 80% pass threshold)
-- **Database Layer Tracking:** SQLite with `database.py` (concept_nodes, quiz_attempts, bloom_progress tables)
-- **Progress Persistence:** Quiz scores saved, layer progression tracked, retry with reshuffle
+- **Level 1 (Remember):** Define concepts in own words → AI validates without giving the answer
+- **Database Layer Tracking:** SQLite with `database.py` (concept_nodes, bloom_progress tables)
+- **Progress Persistence:** AI validation results saved, layer progression tracked
 - **PDF Extraction:** PyPDF2 + LM Studio (Docling experiment abandoned due to 3-5 min first-run time)
 - **Bug Fixes:** Duplicate node IDs in vis.js, white screen after confirmation, centered panel layout
 
 ### Files Created for v2.0 (Current)
-- `app_flask.py` — Flask backend with quiz generation, submission, progress tracking
-- `database.py` — SQLite schema with layer tracking, quiz attempts, Bloom progress
+- `app_flask.py` — Flask backend with progress tracking, extraction routes
+- `database.py` — SQLite schema with layer tracking, Bloom progress
 - `concept_extractor_pypdf2.py` — PDF text extraction using PyPDF2
 - `concept_extractor_docling.py` — (Archived) Docling-based extraction, not used
 - `pipeline_state.py` — Background task progress tracking with FileLock
 - `templates/index.html` — Dark theme 3-panel UI with centered review modal
 - `static/css/style.css` — Dark theme styles (~800 lines)
-- `static/js/app.js` — Client-side logic with quiz system, tree rendering, vis.js
+- `static/js/app.js` — Client-side logic with tree rendering, vis.js
 - `static/lib/vis-9.1.2/` — vis.js graph visualization
 - `static/lib/tom-select/` — Dropdown library for search/filters
 
-### Current Status (April 7, 2026 — Night)
-**Phase 1 Complete ✅**
+### Current Status (April 8, 2026 — Morning)
+**Phase 1 Complete ✅ | Git Pushed to `origin/main`**
 - UI: ✅ Dark theme, 3-panel layout, centered review modal
 - Hierarchy: ✅ Main topics → Sub-topics with selectable checkboxes
-- Level 1: ✅ Quiz (Definition → Concept matching), ≥80% pass threshold
-- Database: ✅ SQLite with layer tracking, quiz attempts, progress
-- PDF Extraction: ✅ PyPDF2 + LM Studio (gemma-4-e4b-uncensored-hauhaucs-aggressive)
-- Progress: ✅ Retry with reshuffle, layer progression (Layer 1 → Layer 2)
+- Level 1: ✅ AI validation gate (activity-based progression)
+- Database: ✅ SQLite with layer tracking, progress
+- PDF Extraction: ✅ PyPDF2 + LM Studio (gpt-oss-20b-uncensored-hauhaucs-aggressive)
+- Progress: ✅ Activity-based progression, layer progression (Layer 1 → Layer 2)
+- Git: ✅ v2.0 architecture committed (`559cdc7`) and pushed
 - Next: Level 2 (Understand) — Paraphrase + semantic similarity check
 
 ### Architecture Changes
 | Component | Old | New |
 |-----------|-----|-----|
 | Extraction | LLM-only | PyPDF2 text + LLM hierarchy |
-| Quiz | Placeholder | Definition→Concept matching with database tracking |
+| Progression | Quiz-gated | Activity-gated (no quizzes) |
 | UI | Light theme, full-width panels | Dark theme, centered modal overlay |
 | Database | JSON only | SQLite with layer/progress tracking |
 | Hierarchy | Flat list | Main Topics → Sub-topics with checkboxes |
@@ -69,7 +76,7 @@ Layer 1 (Main Headings) → Layer 2 (Subheadings)
 
 | Level | Name | Activity | Gate |
 |-------|------|----------|------|
-| 1 | Remember | Define concepts in own words | AI validates + Quiz ≥80% |
+| 1 | Remember | Define concepts in own words | All concepts AI-validated |
 | 2 | Understand | Paraphrase definitions | Similarity 0.85-0.95 |
 | 3 | Apply | Solve scenarios using concepts | 3 consecutive correct |
 | 4 | Analyze | Build concept graph + defend edges | 5 edges defended |
@@ -95,7 +102,7 @@ Understand this before touching any file. Every tool was chosen deliberately.
 | Backend API | Flask | 3.0+ | Lightweight, session management |
 | Graph Visual | vis.js | 9.1.2 | Interactive node/edge canvas |
 | LLM Runtime | LM Studio | latest | Local LLM server, offline |
-| LLM Model | Gemma 4 E4B Uncensored | — | 8GB RAM friendly, fast |
+| LLM Model | GPT-OSS 20B Uncensored | — | 20B parameter, higher reasoning quality |
 | PDF Reading | PyPDF2 | 3.0.1 | Text extraction from PDFs |
 | Database | SQLite | — | Single file, zero setup |
 | File Locking | filelock | 3.13+ | Safe concurrent access |
@@ -105,37 +112,47 @@ Understand this before touching any file. Every tool was chosen deliberately.
 Create this exact structure before writing feature code. Do not rename files — the rest of this document references them by name.
 ```
 cognimap-fyp/
-├── app_flask.py                # Flask backend (quiz, progress, extraction routes)
-├── database.py                 # SQLite operations (concept_nodes, quiz_attempts, bloom_progress)
-├── concept_extractor_pypdf2.py # PDF extraction using PyPDF2 + LM Studio
-├── concept_extractor_docling.py # (Archived) Docling-based extraction, not used
-├── pipeline_state.py           # Background task progress tracking with FileLock
-├── requirements.txt            # Python dependencies (flask, PyPDF2, filelock, etc.)
-├── .gitignore                  # Excludes venv/, *.db, __pycache__/, etc.
-├── README.md                   # Setup instructions
-├── run.bat                     # One-command launcher (Windows)
+├── app_flask.py                    # Thin — blueprint registration + UI + file mgmt
+├── database.py                     # All SQLite operations (single owner)
+├── concept_extractor_pypdf2.py     # DEPRECATED — re-exports from core/
+├── pipeline_state.py               # DEPRECATED — re-exports from core/
+├── requirements.txt                # Python dependencies
+├── .gitignore
+├── README.md
+├── run.bat                         # One-command launcher (Windows)
 ├── .streamlit/
-│   └── config.toml             # Streamlit theme (legacy)
-├── static/                     # Flask v2.0 static assets
+│   └── config.toml                 # Streamlit theme (legacy)
+├── core/                           # Shared infrastructure used by ALL levels
+│   ├── __init__.py                 # Exports all core functions
+│   ├── llm.py                      # LM Studio calls + research logging
+│   ├── progress.py                 # Bloom gate enforcement, unlock logic
+│   ├── graph_ops.py                # Graph read/write, node/edge CRUD
+│   ├── extraction.py               # PDF text extraction + concept parsing
+│   └── pipeline_state.py           # Background task progress tracking
+├── levels/                         # Per-level logic (isolated, no cross-imports)
+│   ├── __init__.py                 # Registers all level blueprints
+│   ├── level1_remember/            # POST /api/level1/validate-definition
+│   ├── level2_understand/          # POST /api/level2/validate-paraphrase
+│   ├── level3_apply/               # POST /api/level3/add-edge
+│   ├── level4_analyze/             # GET /api/level4/status
+│   ├── level5_evaluate/            # GET /api/level5/status
+│   └── level6_create/              # GET /api/level6/status
+├── static/
 │   ├── css/
-│   │   └── style.css           # Dark theme styles (~800 lines)
+│   │   └── style.css
 │   ├── js/
-│   │   └── app.js              # Client-side logic (quiz, tree, vis.js)
+│   │   ├── app.js                  # Bootstrapper
+│   │   ├── shared/api.js           # Shared API client
+│   │   └── levels/                 # Per-level JS modules
 │   └── lib/
-│       ├── vis-9.1.2/          # vis.js graph visualization
-│       └── tom-select/         # Dropdown library
+│       ├── vis-9.1.2/
+│       └── tom-select/
 ├── templates/
-│   └── index.html              # Dark theme 3-panel UI with centered modal
-├── data/                       # Uploaded PDFs + SQLite database
-├── output/                     # Extracted concepts cache, graph data, status
-├── uploads/                    # Legacy upload folder (can be removed)
-├── backups/                    # Auto-created database backups
-├── venv/                       # Virtual environment (gitignored)
-├── References/                 # Reference implementation from another project
-│   ├── app.py                  # Flask app from References
-│   ├── lib/                    # vis.js, tom-select (source for copying)
-│   └── scripts/                # Extraction, build, validation scripts
-└── images_problem/             # Screenshots for debugging
+│   └── index.html
+├── data/                           # Uploaded PDFs + SQLite database
+├── output/                         # Extraction cache, graph data, status
+├── References/
+└── images_problem/
 ```
 ---
 4. Environment Setup
@@ -163,10 +180,10 @@ source venv/bin/activate
 ### Step 3 — Install LM Studio + Model
 ```bash
 # 1. Download LM Studio from lmstudio.ai for your OS
-# 2. Open LM Studio GUI → Search for "gemma-4-e4b-uncensored-hauhaucs-aggressive" → Download
+# 2. Open LM Studio GUI → Search for "gpt-oss-20b-uncensored-hauhaucs-aggressive" → Download
 # 3. In LM Studio: Go to Local Server tab → Click "Start Server" (keep LM Studio open)
 # 4. Test it responds under 10 seconds:
-curl http://localhost:1234/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"gemma-4-e4b-uncensored-hauhaucs-aggressive","messages":[{"role":"user","content":"Say hello in one sentence"}]}'
+curl http://localhost:1234/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"gpt-oss-20b-uncensored-hauhaucs-aggressive","messages":[{"role":"user","content":"Say hello in one sentence"}]}'
 ```
 
 ### Step 4 — Install Dependencies
@@ -193,7 +210,7 @@ git commit -m "Initial project setup"
 5. Database Schema
 `database.py` owns all SQLite operations. No other file writes to the database directly.
 
-### Core Tables (3 total)
+### Core Tables (2 total)
 ```sql
 CREATE TABLE IF NOT EXISTS concept_nodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,24 +219,11 @@ CREATE TABLE IF NOT EXISTS concept_nodes (
     concept_type TEXT DEFAULT 'main_topic', -- main_topic or sub_topic
     name TEXT NOT NULL,
     definition TEXT,
-    verified INTEGER DEFAULT 0,           -- 1=passed quiz, 0=pending
+    verified INTEGER DEFAULT 0,           -- 1=AI-validated, 0=pending
     source TEXT,                          -- PDF filename
     page INTEGER,                         -- Page number in PDF
     revision_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS quiz_attempts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    participant_id TEXT DEFAULT 'P01',
-    layer INTEGER DEFAULT 1,              -- 1 or 2
-    level INTEGER DEFAULT 1,              -- 1=Remember through 6=Create
-    score REAL NOT NULL,                  -- 0.0 to 1.0
-    total_questions INTEGER NOT NULL,
-    passed INTEGER DEFAULT 0,             -- 1=≥80%, 0=<80%
-    questions_json TEXT,                  -- JSON of quiz questions
-    responses_json TEXT,                  -- JSON of user responses
-    timestamp TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS bloom_progress (
@@ -251,31 +255,27 @@ def initialize_database():
 Build in this order. Do not jump ahead. Each phase has a clear test before moving on.
 
 ---
-### Phase 1 — Infrastructure + Level 1 Quiz ✅ COMPLETE
-**Goal:** UI working, PDF upload, concept extraction, Level 1 quiz functional.
+### Phase 1 — Infrastructure + Level 1 (Remember) ✅ COMPLETE
+**Goal:** UI working, PDF upload, concept extraction, Level 1 AI validation functional.
 
 **Files created:**
-- `app_flask.py` — Flask backend with quiz generation, submission, progress routes
-- `database.py` — SQLite schema with layer tracking, quiz attempts
+- `app_flask.py` — Flask backend with progress tracking, extraction routes
+- `database.py` — SQLite schema with layer tracking, Bloom progress
 - `concept_extractor_pypdf2.py` — PDF text extraction using PyPDF2
 - `pipeline_state.py` — Background task progress tracking
 - `templates/index.html` — Dark theme 3-panel UI with centered modal
 - `static/css/style.css` — Dark theme styles (~800 lines)
-- `static/js/app.js` — Client-side logic with quiz system, tree rendering, vis.js
+- `static/js/app.js` — Client-side logic with tree rendering, vis.js
 
 **Test results:**
 - [x] Upload PDF → Extract Concepts → Tree view with checkboxes
 - [x] Select concepts → Confirm → Graph renders with blue dots
-- [x] Level 1 Quiz generates (Definition → Concept matching)
-- [x] Quiz scoring works (≥80% pass threshold)
-- [x] Retry with reshuffle on fail
 - [x] Layer progression tracked (Layer 1 → Layer 2)
-- [x] Database saves quiz attempts and progress
+- [x] Database saves progress
 
 **Notes:**
 - PyPDF2 + LM Studio for extraction (Docling abandoned due to 3-5 min first-run time)
 - Hierarchy: Main Topics (Layer 1) → Sub-topics (Layer 2)
-- Quiz format: Show definition → select matching concept name (4 options)
 - vis.js for graph visualization with unique node IDs
 - Dark theme with centered review modal overlay
 
@@ -310,7 +310,7 @@ def check_paraphrase(original: str, paraphrase: str) -> dict:
 - [ ] Copy-pasting original definition rejected (similarity >0.95)
 - [ ] Genuine paraphrase accepted (0.85-0.95)
 - [ ] Unrelated text rejected (<0.85)
-- [ ] Level 2 quiz gate enforced; Level 3 unlocks on pass
+- [ ] Level 2 gate enforced; Level 3 unlocks on pass
 ---
 Phase 5 — Level 3: Apply + Adversarial (Week 8)
 Goal: Students connect concepts. AI challenges their justifications.
@@ -447,7 +447,7 @@ def call_lmstudio(prompt: str, feature: str, participant_id: int) -> str:
     response = httpx.post(
         LMSTUDIO_URL,
         json={
-            "model": "gemma-4-e4b-uncensored-hauhaucs-aggressive",
+            "model": "gpt-oss-20b-uncensored-hauhaucs-aggressive",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
             "max_tokens": 200
@@ -828,9 +828,7 @@ GET  /progress/{participant_id}     # Return level statuses dict
 POST /test/submit                   # Save pre or post test score
 POST /validate/definition           # LLM definition check → VALID or NEEDS_REVISION
 POST /nodes/add                     # Add concept node to NetworkX graph + DB
-POST /quiz/level1/submit            # Score quiz, unlock Level 2 if ≥70%
 POST /validate/paraphrase           # Sentence-transformer similarity check
-POST /quiz/level2/submit            # Score quiz, unlock Level 3 if ≥70%
 POST /edges/add                     # Add edge to graph
 POST /validate/edge                 # LLM adversarial challenge → challenge question
 POST /edges/defend                  # Save student's defense, mark defended_at
@@ -923,8 +921,7 @@ Run these tests manually before each study session. Print this page.
 [ ] F3: Level 2 returns 403 if Level 1 not complete (test via curl) — Phase 3
 [ ] F4: Concept + definition saves node to graph JSON file — Phase 3
 [ ] F5: LLM returns VALID or NEEDS_REVISION prefix in <10s — Phase 3
-[ ] F6: Scoring 60% on Level 1 quiz does NOT unlock Level 2 — Phase 3
-[ ] F6: Scoring 80% on Level 1 quiz DOES unlock Level 2 — Phase 3
+[ ] F6: All concepts AI-validated unlocks Level 2
 [ ] F7: Copy-paste rejected (similarity >0.95); genuine paraphrase accepted (0.85–0.95) — Phase 4
 [ ] F8: Graph renders with nodes visible, edges have arrows — Phase 3
 [ ] F9: All actions visible in SQLite; CSV export downloads — Phase 7
@@ -1186,7 +1183,6 @@ Every technology chosen has a clear upgrade path: SQLite→PostgreSQL, LM Studio
 **Phase 2: PDF Upload + Level 1 (Remember):**
 - PDF upload UI → concept extraction → graph rendering
 - Click node → definition textarea → AI validates
-- Quiz modal with MCQs, ≥80% gate → Level 2 unlock
 - +570 lines of frontend code (HTML/CSS/JS)
 - 19 new TDD tests
 
@@ -1216,5 +1212,5 @@ python -m pytest tests/test_flask_*.py --cov=app_flask --cov-report=term-missing
 ```
 
 ---
-AGENTS.md | CogniMap MVP | Version 2.0 | April 5, 2026
-Phase 2 Complete: PDF Upload + Level 1 (Remember) — 89/89 Tests Passing
+AGENTS.md | CogniMap MVP | Version 2.0 | April 8, 2026
+Phase 1 Complete: Flask + vis.js Architecture — Git Pushed (`559cdc7`)

@@ -46,7 +46,7 @@ Understand this before touching any file. Every tool was chosen deliberately.
 | Frontend | Streamlit | 1.32.0 | Python-only, no HTML/CSS needed, renders in browser |
 | Backend API | FastAPI | 0.110.0 | Auto API docs, Pydantic validation, enforces state machine |
 | LLM Runtime | LM Studio | latest | GUI-based local LLM server, free, works offline, OpenAI-compatible API |
-| LLM Model | Gemma 4 E4B Uncensored | — | Fits 8GB RAM, fast, excellent instruction-following |
+| LLM Model | GPT-OSS 20B Uncensored | — | 20B parameter, higher reasoning quality |
 | Graph Core | NetworkX | 3.2.1 | JSON-serializable, integrates natively with pyvis |
 | Graph Visual | pyvis | 0.3.2 | Interactive HTML graphs, embeddable in Streamlit |
 | Vector DB | ChromaDB (embedded) | 0.4.24 | No server, pure Python, persists to folder |
@@ -79,34 +79,63 @@ Create this exact structure before writing feature code. Do not rename files —
 
 ```
 cognimap-fyp/
-├── app.py                      # Streamlit frontend entry point
-├── api.py                      # FastAPI backend (all routes here)
-├── database.py                 # All SQLite operations
-├── graph_utils.py              # NetworkX graph operations
-├── llm_utils.py                # LM Studio calls + ChromaDB RAG
-├── test_system.py              # Pre/post test questions + scoring logic
-├── requirements.txt            # Python dependencies (exact versions)
-├── .gitignore                  # Excludes venv/, *.db, chroma_db/, *.json
-├── README.md                   # Setup instructions (must work for a stranger)
-├── run.sh                      # One-command launcher (Mac/Linux)
-├── run.bat                     # One-command launcher (Windows)
+├── app_flask.py                    # Thin — blueprint registration + UI + file mgmt
+├── database.py                     # All SQLite operations (single owner)
+├── concept_extractor_pypdf2.py     # DEPRECATED — re-exports from core/
+├── pipeline_state.py               # DEPRECATED — re-exports from core/
+├── requirements.txt                # Python dependencies
+├── .gitignore
+├── README.md
+├── run.bat                         # One-command launcher (Windows)
 ├── .streamlit/
-│   └── config.toml             # Streamlit theme configuration
-├── pages/                      # Streamlit multi-page app
-│   ├── 01_consent.py           # Digital consent form
-│   ├── 02_pretest.py           # 18-question pre-test
-│   ├── 03_level1_remember.py   # Concept definition + AI validation
-│   ├── 04_level2_understand.py # Paraphrase + semantic similarity
-│   ├── 05_level3_apply.py      # Edge creation + adversarial challenge
-│   ├── 06_posttest.py          # 18-question post-test
-│   └── 07_questionnaires.py    # SUS + NASA-TLX forms
-├── tests/                      # Unit tests
-│   ├── test_gates.py           # Test level gate enforcement
-│   └── test_database.py        # Test SQLite operations
-├── backups/                    # Auto-created by run.sh; never commit
-└── docs/
-    ├── thesis/
-    └── diagrams/
+│   └── config.toml                 # Streamlit theme (legacy)
+├── core/                           # Shared infrastructure used by ALL levels
+│   ├── __init__.py                 # Exports all core functions
+│   ├── llm.py                      # LM Studio calls + research logging
+│   ├── progress.py                 # Bloom gate enforcement, unlock logic
+│   ├── graph_ops.py                # Graph read/write, node/edge CRUD
+│   ├── extraction.py               # PDF text extraction + concept parsing
+│   └── pipeline_state.py           # Background task progress tracking
+├── levels/                         # Per-level logic (isolated, no cross-imports)
+│   ├── __init__.py                 # Registers all level blueprints
+│   ├── level1_remember/
+│   │   ├── __init__.py
+│   │   └── routes.py               # POST /api/level1/validate-definition
+│   ├── level2_understand/
+│   │   ├── __init__.py
+│   │   └── routes.py               # POST /api/level2/validate-paraphrase
+│   ├── level3_apply/
+│   │   ├── __init__.py
+│   │   └── routes.py               # POST /api/level3/add-edge
+│   ├── level4_analyze/
+│   │   ├── __init__.py
+│   │   └── routes.py               # GET /api/level4/status
+│   ├── level5_evaluate/
+│   │   ├── __init__.py
+│   │   └── routes.py               # GET /api/level5/status
+│   └── level6_create/
+│       ├── __init__.py
+│       └── routes.py               # GET /api/level6/status
+├── static/
+│   ├── css/
+│   │   └── style.css
+│   ├── js/
+│   │   ├── app.js                  # Bootstrapper — loads level modules
+│   │   ├── shared/
+│   │   │   └── api.js              # Shared API client
+│   │   └── levels/
+│   │       ├── level1.js           # Level 1 UI logic
+│   │       ├── level2.js
+│   │       └── level3.js
+│   └── lib/
+│       ├── vis-9.1.2/
+│       └── tom-select/
+├── templates/
+│   └── index.html
+├── data/                           # Uploaded PDFs + SQLite database
+├── output/                         # Extraction cache, graph data, status
+├── References/
+└── images_problem/
 ```
 
 ---
@@ -138,10 +167,10 @@ source venv/bin/activate
 ### Step 3 — Install LM Studio + Model
 ```bash
 # 1. Download LM Studio from lmstudio.ai for your OS
-# 2. Open LM Studio GUI → Search for "gemma-4-e4b-uncensored-hauhaucs-aggressive" → Download the model
+# 2. Open LM Studio GUI → Search for "gpt-oss-20b-uncensored-hauhaucs-aggressive" → Download the model
 # 3. In LM Studio: Go to Local Server tab → Click "Start Server" (keep LM Studio open)
 # 4. Test it responds under 10 seconds via API:
-curl http://localhost:1234/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"gemma-4-e4b-uncensored-hauhaucs-aggressive","messages":[{"role":"user","content":"Say hello in one sentence"}]}'
+curl http://localhost:1234/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"gpt-oss-20b-uncensored-hauhaucs-aggressive","messages":[{"role":"user","content":"Say hello in one sentence"}]}'
 ```
 
 ### Step 4 — requirements.txt
@@ -363,7 +392,7 @@ Build in this order. Do not jump ahead. Each phase has a clear test before movin
 2. `graph_utils.py` — `load_graph()`, `save_graph()`, `add_node()`, `render_graph_in_streamlit()`
 3. `api.py` — add `POST /validate/definition`, `POST /nodes/add`, `GET /progress/{participant_id}`
 4. `pages/03_level1_remember.py` — concept input → definition textarea → submit → show AI feedback
-5. Level 1 quiz logic + `POST /quiz/level1/submit` endpoint (gate: ≥70% score → unlock Level 2)
+5. Progress gate: all concepts AI-validated → unlock Level 2
 
 **LLM Prompt for Definition Validator (critical — do not change the NEVER GIVE THE ANSWER rule):**
 ```python
@@ -390,7 +419,7 @@ Respond now:"""
 - [ ] Response is logged to `llm_logs` with `response_time_ms`
 - [ ] Node is saved to NetworkX graph JSON file
 - [ ] Graph renders in browser with pyvis
-- [ ] Level 1 quiz gate: scoring <70% shows "try again"; ≥70% updates `bloom_progress` Level 2 to 'active'
+- [ ] Progress gate: all concepts AI-validated → unlocks Level 2
 
 ---
 
@@ -429,7 +458,7 @@ def check_paraphrase(original: str, paraphrase: str) -> dict:
 - [ ] Copy-pasting original definition is rejected (similarity >0.95)
 - [ ] Genuine paraphrase with similarity 0.85–0.95 is accepted
 - [ ] Completely unrelated text is rejected (similarity <0.85)
-- [ ] Level 2 quiz gate enforced; Level 3 unlocks on pass
+- [ ] Level 2 gate enforced; Level 3 unlocks on pass
 
 ---
 
@@ -585,7 +614,7 @@ def call_lmstudio(prompt: str, feature: str, participant_id: int) -> str:
     response = httpx.post(
         LMSTUDIO_URL,
         json={
-            "model": "gemma-4-e4b-uncensored-hauhaucs-aggressive",
+            "model": "gpt-oss-20b-uncensored-hauhaucs-aggressive",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
             "max_tokens": 200
@@ -680,9 +709,7 @@ GET  /progress/{participant_id}     # Return level statuses dict
 POST /test/submit                   # Save pre or post test score
 POST /validate/definition           # LLM definition check → VALID or NEEDS_REVISION
 POST /nodes/add                     # Add concept node to NetworkX graph + DB
-POST /quiz/level1/submit            # Score quiz, unlock Level 2 if ≥70%
 POST /validate/paraphrase           # Sentence-transformer similarity check
-POST /quiz/level2/submit            # Score quiz, unlock Level 3 if ≥70%
 POST /edges/add                     # Add edge to graph
 POST /validate/edge                 # LLM adversarial challenge → challenge question
 POST /edges/defend                  # Save student's defense, mark defended_at
@@ -791,8 +818,7 @@ Run these tests manually before each study session. Print this page.
 - [ ] F3: Level 2 returns 403 if Level 1 not complete (test via curl)
 - [ ] F4: Concept + definition saves node to graph JSON file
 - [ ] F5: LLM returns VALID or NEEDS_REVISION prefix in <10s
-- [ ] F6: Scoring 60% on Level 1 quiz does NOT unlock Level 2
-- [ ] F6: Scoring 80% on Level 1 quiz DOES unlock Level 2
+- [ ] F6: All concepts AI-validated unlocks Level 2
 - [ ] F7: Copy-paste rejected (similarity >0.95); genuine paraphrase accepted (0.85–0.95)
 - [ ] F8: Graph renders with nodes visible, edges have arrows
 - [ ] F9: All actions visible in SQLite; CSV export downloads

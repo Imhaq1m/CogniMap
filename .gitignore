@@ -94,3 +94,6 @@ data/*.db
 output/
 uploads/
 images_problem/
+
+.qwen/
+gha-creds-*.json
