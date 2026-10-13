@@ -1,0 +1,224 @@
+body{margin:0;background:#111;color:#eee;font-family:system-ui,sans-serif}
+a{color:#8ab4ff}
+.layout{display:flex;min-height:100vh}
+.sidebar{width:280px;background:#2b2b2e;padding:16px;box-sizing:border-box}
+.brand{font-weight:800;font-size:22px;margin-bottom:16px}
+.card{background:#3a3a3e;border-radius:10px;padding:14px}
+.card h3{margin:0 0 10px 0;font-size:15px}
+.btn{display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:10px;border-radius:8px;border:1px solid #555;background:#4a4a4f;color:#fff;cursor:pointer;text-align:center}
+.btn.primary{background:#2f6fed;border-color:#2f6fed}
+.btn.green{background:#1f9d55;border-color:#1f9d55}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.main{flex:1;padding:18px;display:flex;flex-direction:column;min-width:0;box-sizing:border-box}
+/* Problem 5 follow-up: single border only (no border-inside-border).
+   #graph is a transparent flex wrapper; the visible single box is
+   .graph-canvas. Old double: #graph dashed + padding + svg box. */
+#graph{flex:1;min-height:0;display:flex;flex-direction:column;position:relative;color:#aaa;background:transparent;border:none;padding:0;box-sizing:border-box}
+/* Workspace fills the whole screen dynamically (picker/user pages untouched).
+   Fixed viewport-height chain gives flex:1 a definite height so the canvas
+   grows/shrinks with the window instead of a fixed small box. */
+.layout.workspace{height:100vh;overflow:hidden}
+.layout.workspace .sidebar{height:100vh;overflow:auto;flex-shrink:0}
+.layout.workspace .main{height:100vh;overflow:hidden;box-sizing:border-box}
+.layout.workspace .main h2{flex-shrink:0;margin:0 0 12px 0}
+.layout.workspace #edgePanel,.layout.workspace #debugCard{flex-shrink:0}
+.layout.workspace #debugCard{max-height:160px;overflow:auto}
+.node-blue{color:#6aa8ff}
+#panel{position:fixed;top:0;right:-380px;width:360px;height:100vh;background:#1d1d20;border-left:1px solid #444;transition:right .2s;padding:14px;box-sizing:border-box;overflow-y:auto}
+#panel.open{right:0}
+#modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#modal.open{display:flex}
+.modal-box{background:#222;border:1px solid #555;border-radius:12px;padding:18px;min-width:320px;max-width:560px}
+#progress{margin-top:12px;background:#1c1c1f;border:1px solid #444;border-radius:8px;padding:10px}
+input[type=text]{width:100%;padding:9px;border-radius:8px;border:1px solid #555;background:#141416;color:#eee;box-sizing:border-box}
+.file-row{display:flex;justify-content:space-between;align-items:center;background:#45454a;border-radius:6px;padding:6px 8px;margin:6px 0}
+/* Step 1 slice: Extracted Concepts modal tree */
+.modal-wide{min-width:min(640px,92vw);max-width:720px;max-height:86vh;overflow:auto}
+.modal-head{display:flex;justify-content:space-between;align-items:center}
+.btn.sm{width:auto;padding:4px 10px;margin:0}
+.warn{background:#5a2b2b;border:1px solid #a44;border-radius:8px;padding:8px;margin:8px 0}
+.lock{background:#22304a;border:1px solid #2f6fed;border-radius:8px;padding:10px;margin:8px 0}
+.hidden{display:none}
+.tree-main{border:1px solid #555;border-radius:8px;margin:8px 0;padding:8px}
+.tree-row{display:flex;align-items:center;gap:8px;padding:5px 4px}
+.tree-row.sub{margin-left:26px}
+.tree-row input[type=text]{padding:6px}
+.tree-title{flex:1}
+.icon-btn{background:none;border:none;color:#ccc;cursor:pointer;font-size:15px;padding:2px 6px}
+.icon-btn:hover{color:#fff}
+.row-extracted{background:#2a2a2e;border-radius:6px}
+.row-user{background:#12325e;border:1px solid #2f6fed;border-radius:6px}
+.row-user .tree-title{color:#bcd6ff}
+.add-line{height:14px;background:#e8e8e8;border-radius:7px;margin:6px 0;opacity:.85;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#111;font-size:12px}
+.add-line.sub{margin-left:26px}
+.add-line:hover{background:#2f6fed;color:#fff}
+.modal-foot{margin-top:10px}
+.graph-nodes{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.gnode{background:#2e2e33;border:1px solid #666;border-radius:16px;padding:8px 12px}
+.gnode.blue{background:#12325e;border-color:#2f6fed;color:#bcd6ff}
+.gnode[data-node]{cursor:pointer}
+.gnode[data-node]:hover{border-color:#8ab4ff}
+/* B1 canvas (Locks §0+§4): SVG nodes + ordered edges with mid-line labels */
+/* Problem 5: workspace fills middle (.main flex column, #graph flex:1) +
+   background-drag pan + wheel zoom (viewBox). Controls overlay top-right.
+   Absolute-fill svg: flex-sized SVG collapses in some browsers, so the canvas
+   box carries the flex size and the svg/empty state absolutely fill it. */
+.graph-canvas{margin-top:0;flex:1;min-height:0;position:relative;display:block;overflow:hidden;border-radius:10px;background:#141416;border:1px solid #444}
+.graph-canvas svg{position:absolute;left:0;top:0;width:100%;height:100%;background:transparent;border:none;border-radius:0;display:block;cursor:grab;touch-action:none}
+.graph-canvas svg.panning{cursor:grabbing}
+.graph-controls{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:5}
+.graph-controls button{width:32px;height:32px;border-radius:8px;border:1px solid #555;background:#2b2b2e;color:#eee;cursor:pointer;font-size:16px;line-height:1;padding:0}
+.graph-controls button:hover{border-color:#8ab4ff}
+.graph-empty{position:absolute;left:0;top:0;right:0;bottom:0;padding:24px;text-align:center;color:#aaa;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
+.layout.workspace .graph-nodes{flex:1;overflow:auto}
+#graphSvg .gedge line{stroke:#999;stroke-width:2}
+#graphSvg .gedge{cursor:pointer}
+#graphSvg .edge-label{fill:#fff;font-size:12px;font-weight:700;text-anchor:middle;paint-order:stroke;stroke:#111;stroke-width:3px}
+/* UI_ISSUES.txt Problem 1: every link type has its own color (line + label).
+   data-etype is the lowercased edge_type set in l4.js paintGraph. */
+#graphSvg .gedge[data-etype="causes"] line{stroke:#800000}
+#graphSvg .gedge[data-etype="causes"] .edge-label{fill:#e8a0a0}
+#graphSvg .gedge[data-etype="leads to"] line{stroke:#2563eb}
+#graphSvg .gedge[data-etype="leads to"] .edge-label{fill:#9dbcff}
+#graphSvg .gedge[data-etype="depends on"] line{stroke:#16a34a}
+#graphSvg .gedge[data-etype="depends on"] .edge-label{fill:#7ce3a3}
+#graphSvg .gedge[data-etype="includes"] line{stroke:#f97316}
+#graphSvg .gedge[data-etype="includes"] .edge-label{fill:#fec89b}
+#graphSvg .gedge[data-etype="contrasts with"] line{stroke:#dc2626}
+#graphSvg .gedge[data-etype="contrasts with"] .edge-label{fill:#f3a3a3}
+#graphSvg .gedge[data-etype="applied in"] line{stroke:#1e3a8a}
+#graphSvg .gedge[data-etype="applied in"] .edge-label{fill:#a9c2f5}
+#graphSvg .gedge[data-etype="influences"] line{stroke:#9333ea}
+#graphSvg .gedge[data-etype="influences"] .edge-label{fill:#d3b5fb}
+#graphSvg .gedge[data-etype="consists of"] line{stroke:#166534}
+#graphSvg .gedge[data-etype="consists of"] .edge-label{fill:#8fe3bd}
+/* Custom (any non-preset) stays grey via the default above; explicit rule
+   for rows/panel dots uses #9ca3af. */
+/* L5 dim/bright must win over per-type colors — keep these AFTER type rules. */
+#graphSvg .gedge.edge-dim line{stroke:#555}
+#graphSvg .gedge.edge-dim .edge-label{fill:#fff}
+#graphSvg .gedge.edge-dim{opacity:.38}
+/* Drag-link ghost: dashed dimmed blue = in-progress preview (not a saved
+   link). Saved links use solid per-type colors; ghost vanishes on drop. */
+#graphSvg .drag-ghost{stroke:#5a7fa6;stroke-width:2.5;stroke-dasharray:7 5;fill:none;pointer-events:none;opacity:.85}
+@media (prefers-reduced-motion: no-preference) {
+  #graphSvg .drag-ghost{animation:cogDash .6s linear infinite}
+  @keyframes cogDash{to{stroke-dashoffset:-12}}
+}
+/* Per-type dots in selected popup + #edgeOpts picker. */
+.link-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:baseline}
+.edge-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin:0 6px 0 4px;vertical-align:baseline}
+.edge-custom-hint{color:#aaa;font-size:12px}
+/* Valid drop target while dragging: glowing ring (same node never glows). */
+#graphSvg g.gnode.drop-target circle{stroke:#8ab4ff;stroke-width:3;filter:drop-shadow(0 0 6px rgba(138,180,255,.9))}
+#graphSvg g.gnode{cursor:grab}
+#graphSvg g.gnode.dragging{cursor:grabbing}
+#graphSvg g.gnode.dragging circle{stroke:#fff;stroke-width:2.5;filter:drop-shadow(0 0 8px rgba(255,255,255,.5))}
+@media (prefers-reduced-motion: no-preference) {
+  /* Fluid micro-interactions: hover lift + grab scale + pulsing target.
+     transform-box keeps SVG <g> scaling centered. Transitions are short
+     (120ms) to stay snappy + precise for L4 link drops. */
+  #graphSvg g.gnode{transform-box:fill-box;transform-origin:center;transition:transform 120ms ease-out,filter 120ms ease-out}
+  #graphSvg g.gnode:hover{transform:scale(1.04)}
+  #graphSvg g.gnode.dragging{transform:scale(1.06)}
+  #graphSvg g.gnode.drop-target{animation:cogPulse .9s ease-in-out infinite}
+  @keyframes cogPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
+  #graphSvg .edge-label{transition:opacity 120ms ease-out}
+  #graphSvg.dragging-active .edge-label{opacity:.85}
+}
+#graphSvg g.gnode circle{fill:#2e2e33;stroke:#888;stroke-width:1.5}
+#graphSvg g.gnode.blue circle{fill:#12325e;stroke:#2f6fed}
+#graphSvg g.gnode.dimmed{opacity:.45}
+#graphSvg g.gnode:hover circle{stroke:#8ab4ff}
+#graphSvg .node-label{fill:#eee;font-size:11px;text-anchor:middle;pointer-events:none}
+#graphSvg g.gnode.blue .node-label{fill:#bcd6ff}
+/* Step 2 slice: L1-2 drawer + L3 transition */
+.drawer-head{display:flex;justify-content:space-between;align-items:center}
+.expl-box{background:#242428;border:1px solid #555;border-radius:8px;padding:10px;margin:10px 0}
+.expl-tag{font-size:12px;color:#9fb6dd;margin-bottom:6px}
+.expl-text{white-space:pre-wrap}
+.expl-text.muted{color:#aaa}
+.expl-diag{margin-top:8px;font-size:13px;color:#c9b98a}
+textarea{width:100%;box-sizing:border-box;background:#141416;color:#eee;border:1px solid #555;border-radius:8px;padding:9px;font-family:inherit}
+#drawerFb{margin-top:8px}
+.fb-ok{color:#5fd08a;font-weight:700}
+.fb-bad{color:#e08a8a;font-weight:700}
+.fb-hint{color:#c9b98a;margin-top:4px}
+#l3modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#l3modal.open{display:flex}
+#l12guide{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#l12guide.open{display:flex}
+.green-inline{width:auto;display:inline-block;padding:2px 10px;margin-left:8px}
+.btn.purple{background:#6d28d9;border-color:#6d28d9}
+/* Step 3 slice: L3 scenario split panel + L4 transition */
+#scnmodal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#scnmodal.open{display:flex}
+.scn-split{display:flex;gap:14px}
+.scn-left{flex:1;background:#242428;border-radius:8px;padding:10px}
+.scn-right{flex:1}
+.scn-row{border:1px solid #555;border-radius:8px;padding:8px;margin:8px 0}
+.scn-row label{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.scn-row.locked-green{border-color:#1f9d55;background:#0f2e1d}
+#l4modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#l4modal.open{display:flex}
+#l5modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#l5modal.open{display:flex}
+#probemodal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#probemodal.open{display:flex}
+#phase2modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#phase2modal.open{display:flex}
+#donemodal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
+#donemodal.open{display:flex}
+.mid-label{font-weight:700}
+/* Click-to-select delete (L4, no link list): selected edge gets a white glow
+   readable on all 9 per-type colors; popup offers Delete only. */
+#graphSvg .gedge.selected line{stroke-width:4;filter:drop-shadow(0 0 5px rgba(255,255,255,.85))}
+#graphSvg .gedge.selected .edge-label{fill:#fff}
+#edgeSelectedPanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:200;width:min(400px,92vw);background:#222;border:1px solid #555;border-radius:12px;padding:16px;box-sizing:border-box;box-shadow:0 18px 60px rgba(0,0,0,.6)}
+#edgeSelectedPanel::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:-1}
+#edgeSelectedPanel .modal-head h4{margin:0}
+#edgeSelectedSub{margin:8px 0}
+#edgeSelectedMsg{margin:8px 0;color:#e08a8a;min-height:1em}
+#edgeSelectedDelete{width:auto;background:#7f1d1d;border:1px solid #a44;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer}
+#edgeSelectedDelete:hover{background:#991b1b}
+#edgePanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:200;width:min(440px,92vw);max-height:82vh;overflow:auto;background:#222;border:1px solid #555;border-radius:12px;padding:18px;margin:0;box-sizing:border-box;box-shadow:0 18px 60px rgba(0,0,0,.6)}
+#edgePanel::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:-1}
+#edgePanel .modal-head h4{margin:0}
+#edgeSub{margin:6px 0 10px 0}
+#edgeOpts{margin:10px 0}
+#edgeOpts label{display:block;padding:4px 6px;border-radius:6px;cursor:pointer}
+#edgeOpts label:hover{background:#2e2e33}
+.tree-row.dimmed,.tree-main.dimmed{opacity:.45}
+.hist-row{border-bottom:1px solid #444;padding:4px 0;font-size:13px}
+#histBox{margin-top:14px;border-top:1px solid #444;padding-top:10px}
+.hist-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.hist-title{font-weight:800;font-size:14px;flex:1}
+.hist-head select{background:#141416;color:#eee;border:1px solid #555;border-radius:6px;padding:4px 6px;font-size:12px;max-width:110px}
+#histItem{max-width:200px;text-overflow:ellipsis}
+#histView{max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-right:2px}
+.hist-card{background:#242428;border:1px solid #555;border-radius:10px;padding:10px 12px;font-size:13px}
+.hist-card-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.hist-concept{font-weight:800;font-size:14px;flex:1;overflow:hidden;text-overflow:ellipsis}
+.hist-badge{font-size:11px;color:#9fb6dd;background:#1c1c1f;border:1px solid #444;border-radius:20px;padding:2px 8px;white-space:nowrap}
+.hist-sec{margin-top:8px}
+.hist-sec:first-of-type{margin-top:0}
+.hist-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#9fb6dd;margin-bottom:4px}
+.hist-val{background:#1c1c1f;border:1px solid #444;border-radius:8px;padding:8px;white-space:pre-wrap}
+.hist-val.muted{color:#aaa;background:transparent;border:none;padding:4px 0 0 0}
+.hist-meta{font-size:12px;color:#aaa;margin-top:6px}
+.muted{color:#aaa}
+/* UI_ISSUES.txt Problem 3: floating centered add/rename heading panel.
+   Shared by main + sub adds (steps12.js + phase2.js). Overlay centers a
+   compact pretty card above all other modals (z-index 300). */
+#addHeadingModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:300}
+#addHeadingModal.open{display:flex}
+.add-heading-box{width:min(420px,92vw);background:#26262b;border:1px solid #5a5a62;border-radius:14px;padding:20px 20px 16px;box-shadow:0 24px 70px rgba(0,0,0,.65);box-sizing:border-box}
+.add-heading-box .modal-head h3{margin:0;font-size:17px}
+#addHeadingSub{margin:8px 0 12px 0;font-size:13px}
+.add-heading-label{display:block;font-size:13px;font-weight:600;color:#c9c9d4;margin:0 0 12px 0}
+.add-heading-label select{display:block;width:100%;margin-top:6px;background:#141416;color:#eee;border:1px solid #555;border-radius:8px;padding:9px;font-family:inherit;font-size:14px;box-sizing:border-box}
+#addHeadingInput{font-size:15px;padding:11px 12px;margin-bottom:4px}
+#addHeadingInput:focus{outline:none;border-color:#2f6fed;box-shadow:0 0 0 2px rgba(47,111,237,.35)}
+#addHeadingMsg{margin:10px 0 0 0}
+.add-heading-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+.add-heading-foot .btn{width:auto;min-width:96px;margin:0;padding:10px 18px}

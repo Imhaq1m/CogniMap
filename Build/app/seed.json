@@ -1,0 +1,198 @@
+{
+ "_demo_note": "demo-blue: c6 is user_added with explanation_text '' / explanation_source 'user' (Locks §1 two-step Confirm shape) so the stub demos the blue bypass without keys; a real extractor outputs extracted rows only.",
+ "concepts": [
+  {
+   "concept_id": "c1",
+   "diagram_description": "Scatter of labeled points splitting into two loose clusters; illustrates grouping without labels.",
+   "diagram_refs": [
+    {
+     "diagram_id": "fig-p5-1",
+     "page": 5
+    }
+   ],
+   "explanation_source": "extracted",
+   "explanation_text": "Machine Learning is a subfield of AI where systems learn patterns from data instead of following fixed rules.",
+   "explanation_type": "definition",
+   "kind": "main",
+   "pages": [
+    5,
+    6
+   ],
+   "parent_id": null,
+   "source": "extracted",
+   "title": "Machine Learning"
+  },
+  {
+   "concept_id": "c1s1",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "generated",
+   "explanation_text": "AI-grounded from doc scope: statistics provides estimation and uncertainty tools used across ML steps (scope pp. 6-7).",
+   "explanation_type": "principle",
+   "kind": "sub",
+   "pages": [
+    6,
+    7
+   ],
+   "parent_id": "c1",
+   "source": "extracted",
+   "title": "Roles of Statistics"
+  },
+  {
+   "concept_id": "c1s2",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "generated",
+   "explanation_text": "AI-grounded from doc scope: computer science provides algorithms, data pipelines and compute for ML (scope pp. 6-8).",
+   "explanation_type": "framework",
+   "kind": "sub",
+   "pages": [
+    6,
+    8
+   ],
+   "parent_id": "c1",
+   "source": "extracted",
+   "title": "Role of Computer Science"
+  },
+  {
+   "concept_id": "c2",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "extracted",
+   "explanation_text": "Applications are deployed ML systems that solve domain tasks such as recommendation or risk scoring.",
+   "explanation_type": "definition",
+   "kind": "main",
+   "pages": [
+    9
+   ],
+   "parent_id": null,
+   "source": "extracted",
+   "title": "Applications"
+  },
+  {
+   "concept_id": "c2s1",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "generated",
+   "explanation_text": "AI-grounded from doc scope: retail uses demand forecasting and recommendations (scope p. 9).",
+   "explanation_type": "procedure",
+   "kind": "sub",
+   "pages": [
+    9
+   ],
+   "parent_id": "c2",
+   "source": "extracted",
+   "title": "Retail"
+  },
+  {
+   "concept_id": "c2s2",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "generated",
+   "explanation_text": "AI-grounded from doc scope: finance uses credit scoring and fraud detection (scope p. 10).",
+   "explanation_type": "procedure",
+   "kind": "sub",
+   "pages": [
+    10
+   ],
+   "parent_id": "c2",
+   "source": "extracted",
+   "title": "Finance"
+  },
+  {
+   "concept_id": "c3",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "extracted",
+   "explanation_text": "Types of Learning group ML by feedback signal: labels, no labels, or rewards.",
+   "explanation_type": "framework",
+   "kind": "main",
+   "pages": [
+    11,
+    12
+   ],
+   "parent_id": null,
+   "source": "extracted",
+   "title": "Types of Learning"
+  },
+  {
+   "concept_id": "c3s1",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "extracted",
+   "explanation_text": "Supervised learning maps labeled inputs to outputs for prediction tasks.",
+   "explanation_type": "definition",
+   "kind": "sub",
+   "pages": [
+    11
+   ],
+   "parent_id": "c3",
+   "source": "extracted",
+   "title": "Supervised Learning"
+  },
+  {
+   "concept_id": "c3s2",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "extracted",
+   "explanation_text": "Unsupervised learning finds structure in unlabeled data such as clusters.",
+   "explanation_type": "definition",
+   "kind": "sub",
+   "pages": [
+    12
+   ],
+   "parent_id": "c3",
+   "source": "extracted",
+   "title": "Unsupervised Learning"
+  },
+  {
+   "concept_id": "c4",
+   "diagram_description": "Flowchart: collect data, train model, validate, deploy; illustrates the ML pipeline steps.",
+   "diagram_refs": [
+    {
+     "diagram_id": "fig-p13-1",
+     "page": 13
+    }
+   ],
+   "explanation_source": "generated",
+   "explanation_text": "AI-grounded from doc scope: the ML pipeline runs collect, train, validate, deploy (scope pp. 13-14).",
+   "explanation_type": "procedure",
+   "kind": "main",
+   "pages": [
+    13,
+    14
+   ],
+   "parent_id": null,
+   "source": "extracted",
+   "title": "Model Pipeline"
+  },
+  {
+   "concept_id": "c5",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "extracted",
+   "explanation_text": "Evaluation measures model quality with held-out data and task metrics.",
+   "explanation_type": "principle",
+   "kind": "main",
+   "pages": [
+    15
+   ],
+   "parent_id": null,
+   "source": "extracted",
+   "title": "Evaluation"
+  },
+  {
+   "concept_id": "c6",
+   "diagram_description": "",
+   "diagram_refs": [],
+   "explanation_source": "user",
+   "explanation_text": "",
+   "explanation_type": "definition",
+   "kind": "main",
+   "pages": [],
+   "parent_id": null,
+   "source": "user_added",
+   "title": "Deployment (my map)"
+  }
+ ]
+}
