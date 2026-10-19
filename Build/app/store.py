@@ -459,10 +459,10 @@ def confirm_selection(session_id: str, user_id: int, concepts: list[dict]) -> di
     mains-only + l12_status/l3_counted_ids kind checks; no explicit
     hidden-flag column, no migration post-freeze; Phase-2 restricted-modal
     preselect lands in Step 6 per §7, see TODO Step 6).
-    M2 (Locks §6 Deselect ≠ Delete for subs): Step-2 UI disables sub checkboxes
-    in Phase-1 — subs always persist with a selected parent (unchecked never
-    discards). Parent-integrity still enforced: sub needs a selected main
-    parent, orphans forbidden; subs of unselected mains excluded.
+    Locks §6 Deselect ≠ Delete applies to mains and subs: unchecked rows are
+    excluded from Confirm (row kept in UI), not stored. Parent-integrity still
+    enforced: sub needs a selected main parent, orphans forbidden; subs of
+    unselected mains excluded.
     """
     s = get_session(session_id)
     if not s:

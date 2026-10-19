@@ -139,26 +139,35 @@
       if (j.fail_passed) el('probeFail').disabled = true;
       paint(j.progress);
       refresh();
-      if (j.link && j.link.bright) {
-        el('probeMsg').innerHTML = '<div class="fb-ok">Link bright ✔</div>';
-        setTimeout(() => el('probemodal').classList.remove('open'), 900);
+      // Manual-close only: the probe modal never auto-closes so the user has
+      // time to read LLM feedback. Close via the × (probeX) top-right.
+      // Final transitions (Phase2/done) also wait for an explicit Continue
+      // click instead of swapping modals immediately.
+      if (j.phase2_ready) {
+        el('probeMsg').innerHTML = '<div class="fb-ok">Link bright ✔ — all evaluated. Review the feedback above, then continue.</div><button class="btn primary" id="probeNext">Continue to Sub-Headings</button>';
+        const nx = el('probeNext');
+        if (nx) nx.onclick = () => {
+          el('probemodal').classList.remove('open');
+          const m = el('phase2modal');
+          // Problem 2: stage L5 → Phase2, hide stage cards (modal covers).
+          try { if (window.CogniMapStage && window.CogniMapStage.refreshSidebar) window.CogniMapStage.refreshSidebar('Phase2'); } catch (e) { /* sidebar optional */ }
+          if (m) { if (window.CogniMapPhase2) CogniMapPhase2.open(); else m.classList.add('open'); }
+        };
+      } else if (j.done) {
+        el('probeMsg').innerHTML = '<div class="fb-ok">Link bright ✔ — all learned, final map intact. Review the feedback above, then continue.</div><button class="btn primary" id="probeNext">View final map</button>';
+        // Final-done modal (mirrors L3/L4/L5 transition pattern, Details Phase 2 §3).
+        const nx2 = el('probeNext');
+        if (nx2) nx2.onclick = () => {
+          el('probemodal').classList.remove('open');
+          // Problem 2: stage → done, hide stage cards (final map).
+          try { if (window.CogniMapStage && window.CogniMapStage.refreshSidebar) window.CogniMapStage.refreshSidebar('done'); } catch (e) { /* sidebar optional */ }
+          const d = el('donemodal');
+          if (d) d.classList.add('open');
+        };
+      } else if (j.link && j.link.bright) {
+        el('probeMsg').innerHTML = '<div class="fb-ok">Link bright ✔ — review the feedback above, then close with × (top-right) to continue.</div>';
       } else {
         el('probeMsg').innerHTML = '<div class="fb-bad">Rewrite the failed side only — passed side stays green.</div>';
-      }
-      if (j.phase2_ready) {
-        el('probemodal').classList.remove('open');
-        const m = el('phase2modal');
-        // Problem 2: stage L5 → Phase2, hide stage cards (modal covers).
-        try { if (window.CogniMapStage && window.CogniMapStage.refreshSidebar) window.CogniMapStage.refreshSidebar('Phase2'); } catch (e) { /* sidebar optional */ }
-        if (m) { if (window.CogniMapPhase2) CogniMapPhase2.open(); else m.classList.add('open'); }
-      } else if (j.done) {
-        el('probeMsg').innerHTML += '<div class="fb-ok">All learned — final map intact.</div>';
-        // Final-done modal (mirrors L3/L4/L5 transition pattern, Details Phase 2 §3).
-        el('probemodal').classList.remove('open');
-        // Problem 2: stage → done, hide stage cards (final map).
-        try { if (window.CogniMapStage && window.CogniMapStage.refreshSidebar) window.CogniMapStage.refreshSidebar('done'); } catch (e) { /* sidebar optional */ }
-        const d = el('donemodal');
-        if (d) d.classList.add('open');
       }
     } catch (err) { el('probeMsg').textContent = err.message; }
   }

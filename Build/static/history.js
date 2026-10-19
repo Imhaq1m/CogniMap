@@ -89,6 +89,7 @@
     await loadTrail();
     await ensureConcepts();
     await ensureScenarios();
+    await ensureLinks();
     let rows = trailCache.filter(t => t.stage === stage);
     // Concept-panel query: filter by current concept when known.
     if (currentConcept && (stage === 'L3' || stage === 'L1-2')) {
@@ -107,42 +108,25 @@
       });
       rows = Object.values(latestByConcept).sort((a, b) => (a.id || 0) - (b.id || 0));
     }
-    let l5ExcludedNote = '';
     if (stage === 'L5') {
-      // Major 4 (Locks §5+§9): L5 target = l5_status.target_ids (N-fixed).
-      // Phase-2 old main-main links stay bright, excluded — never in target.
-      // Filter incident selector to target_ids so excluded bright links don't
-      // show "No history yet"; label them "Phase-1 bright (excluded)".
+      // Locks §5 vs §9: target_ids gates PROBING only (l5.js openProbe +
+      // probe_submit 400 on excluded old links), never history review.
+      // §9 requires Phase-2 mains reviewable for Stages 1,2,3,5 — old
+      // Phase-1 main-main probe rows must stay visible after Phase-2.
+      // So filter by incident link (all phases), never by current target set.
+      // Excluded bright links with history show their cards; truly empty
+      // shows "No history yet" via renderRows (no special excluded note).
       try {
-        const [links, l5st] = await Promise.all([
-          api('/api/sessions/' + SID + '/links' + q()),
-          api('/api/sessions/' + SID + '/l5/status' + q()),
-        ]);
-        const targetSet = new Set(l5st.target_ids || []);
+        const links = await api('/api/sessions/' + SID + '/links' + q());
+        (links || []).forEach(L => { if (L && L.id) linkCache[L.id] = L; });
         if (currentConcept) {
           const incident = new Set(
             links.filter(L => L.a_id === currentConcept || L.b_id === currentConcept).map(L => L.id)
           );
-          const incidentTarget = new Set([...incident].filter(id => targetSet.has(id)));
-          const excluded = [...incident].filter(id => !targetSet.has(id));
-          const mine = rows.filter(t => incidentTarget.has(t.link_id));
-          if (mine.length) {
-            rows = mine;
-          } else {
-            rows = mine; // target-only (possibly empty)
-            if (incidentTarget.size === 0 && excluded.length) {
-              l5ExcludedNote = 'Phase-1 bright (excluded)';
-            }
-          }
-        } else if (targetSet.size) {
-          // No concept focus: still restrict to the current L5 target set so
-          // Phase-2 doesn't surface old Phase-1 probe rows as current.
-          const inTarget = rows.filter(t => targetSet.has(t.link_id));
-          // Keep all rows when nothing probed yet in this phase (avoid
-          // hiding Phase-1 history when opening L5 pre-entry); once target
-          // rows exist, show target-only.
-          if (inTarget.length) rows = inTarget;
+          rows = rows.filter(t => incident.has(t.link_id));
         }
+        // No-concept focus: show all L5 rows (both phases); grouped by
+        // link_id with the link selector below.
       } catch (e) { /* fall back to all */ }
     }
     if (stage === 'L3') {
@@ -164,16 +148,15 @@
         renderRows(rows);
       }
     } else if (stage === 'L5') {
-      if (!rows.length && l5ExcludedNote) {
-        itemSel.classList.add('hidden');
-        view.innerHTML = '<div class="muted">' + esc(l5ExcludedNote) + '</div>';
-        return;
-      }
       const byLink = {};
       rows.forEach(t => { (byLink[t.link_id || ''] = byLink[t.link_id || ''] || []).push(t); });
       const ids = Object.keys(byLink);
       if (ids.length > 1) {
-        itemSel.innerHTML = ids.map(id => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+        // Same pattern as Stage 3 (Problem 6): dropdown shows the
+        // human-readable link (other concept + type), not the bare id
+        // (full A → type → B flow on hover).
+        itemSel.innerHTML = ids.map(id =>
+          `<option value="${esc(id)}" title="${esc(linkFull(id))}">${esc(linkDropdownLabel(id))}</option>`).join('');
         itemSel.classList.remove('hidden');
         itemSel.onchange = () => renderRows(byLink[itemSel.value] || []);
         renderRows(byLink[ids[0]] || []);
@@ -221,6 +204,59 @@
     const t = scnText(id).replace(/\s+/g, ' ').trim();
     if (!t || t === id) return id || '(unknown scenario)';
     return t.length > 80 ? t.slice(0, 77) + '…' : t;
+  }
+
+  // Stage-5 history needs human-readable link labels, not bare link ids.
+  // Cache id -> link via /links (server owns a_id/b_id/edge_type; trail rows
+  // carry only link_id). Titles resolve via conceptCache.
+  let linkCache = {};
+  async function ensureLinks() {
+    try {
+      const ls = await api('/api/sessions/' + SID + '/links' + q());
+      const next = {};
+      (ls || []).forEach(L => { if (L && L.id) next[L.id] = L; });
+      // Merge (don't wipe) so the L5 target-filter fetch below can seed the
+      // cache without an extra round-trip when ensureLinks ran first.
+      linkCache = Object.assign({}, linkCache, next);
+    } catch (e) { /* pre-confirm: leave empty, fall back to id */ }
+    return linkCache;
+  }
+  function linkFull(id) {
+    // Full relationship flow for card headers: [A] → [type] → [B].
+    // Falls back to the id when link/concepts are unavailable.
+    const L = linkCache[id || ''];
+    if (!L) return id || '(unknown link)';
+    const a = (conceptCache[L.a_id] || {}).title || L.a_id || '';
+    const b = (conceptCache[L.b_id] || {}).title || L.b_id || '';
+    const t = (L.edge_type || '').trim() || '—';
+    if (!a && !b) return id || '(unknown link)';
+    return `${a} → ${t} → ${b}`;
+  }
+  function linkDropdownLabel(id) {
+    // Short other-concept form for the dropdown: direction + linked concept
+    // + relationship type (e.g. "→ Retail via applied in"). Full flow stays
+    // in the title hover + card header. Truncated like scnLabel.
+    const L = linkCache[id || ''];
+    const full = linkFull(id).replace(/\s+/g, ' ').trim();
+    if (!L || !currentConcept) {
+      if (!full || full === id) return id || '(unknown link)';
+      return full.length > 80 ? full.slice(0, 77) + '…' : full;
+    }
+    let other = '', dir = '';
+    if (currentConcept === L.a_id) {
+      other = (conceptCache[L.b_id] || {}).title || L.b_id || '';
+      dir = '→';
+    } else if (currentConcept === L.b_id) {
+      other = (conceptCache[L.a_id] || {}).title || L.a_id || '';
+      dir = '←';
+    } else {
+      if (!full || full === id) return id || '(unknown link)';
+      return full.length > 80 ? full.slice(0, 77) + '…' : full;
+    }
+    const et = (L.edge_type || '').trim() || '—';
+    let short = `${dir} ${other} via ${et}`.replace(/\s+/g, ' ').trim();
+    if (!other) return full.length > 80 ? full.slice(0, 77) + '…' : full;
+    return short.length > 80 ? short.slice(0, 77) + '…' : short;
   }
 
   function pagesLabel(pages) {
@@ -289,7 +325,10 @@
       }
       if (t.stage === 'L5') {
         // m3 (§9): render per-side why_hint/fail_hint alongside answers + feedback.
-        return `<div class="hist-card"><div class="hist-card-head"><span class="hist-concept">${esc(t.link_id || '')}</span>` +
+        // Header shows the full relationship flow (not the bare link id);
+        // id kept as hover title for traceability (mirrors Stage 3 cards).
+        const linkName = linkFull(t.link_id || '');
+        return `<div class="hist-card"><div class="hist-card-head"><span class="hist-concept" title="${esc(t.link_id || '')}">${esc(linkName)}</span>` +
           `<span class="hist-badge">Stage 5</span></div>` +
           `<div class="hist-sec"><div class="hist-label">Why does this relationship exist?</div>` +
           `<div class="hist-val">${esc(p.why_answer || '—')}</div>` +

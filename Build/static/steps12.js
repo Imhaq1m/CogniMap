@@ -92,16 +92,16 @@
 
   function rowHtml(c, isSub) {
     const blue = c.source === 'user_added' ? ' row-user' : ' row-extracted';
-    // M2 (Locks §6+§7): Deselect (uncheck) ≠ Delete. Mains respect the checkbox
-    // (unchecked main excluded from Confirm, row kept). Subs persist hidden in
-    // Phase-1 (never discard, kind-filter hides from Phase-1 math, pre-selected
-    // in Phase-2 restricted modal) — so sub deselect is disabled in Phase-1 to
-    // avoid misleading UI where unchecking appeared to exclude but payload still
-    // included the sub when its parent was checked. Subs are always sent with a
-    // selected parent; orphan subs of unselected mains are still excluded (§6).
-    const subDisabled = isSub ? ' disabled title="Subs persist hidden for Phase-2 (always included with parent)"' : '';
+    // Locks §6: Deselect (uncheck, excluded from Confirm but row kept) ≠ Delete.
+    // Both mains and subs respect the checkbox (Steps_Details: each main and
+    // sub has a checkbox to select/deselect). Unchecked main excluded from
+    // Confirm (row kept); unchecked sub excluded from Confirm (row kept).
+    // Orphan guard in selectedPayload(): subs of unselected mains are still
+    // excluded (parent_id orphans forbidden per §6). §7 never-discard applies
+    // post-Confirm (confirmed subs persist hidden via kind-filter, preselected
+    // in Phase-2) — not a pre-Confirm forced-check.
     return `<div class="tree-row${isSub ? ' sub' : ''}${blue}" data-id="${esc(c.concept_id || c.id)}">
-      <input type="checkbox" data-act="check"${subDisabled} ${c._checked === false && !isSub ? '' : 'checked'}>
+      <input type="checkbox" data-act="check" ${c._checked === false ? '' : 'checked'}>
       <span class="tree-title" data-act="title">${esc(c.title)}</span>
       <button class="icon-btn" data-act="rename" title="rename">✎</button>
       <button class="icon-btn" data-act="del" title="delete pre-Confirm">x</button>
@@ -217,21 +217,18 @@
   }
 
   function selectedPayload() {
-    // Locks §7 (M5) + m3 kind-filter note + M2 sub-deselect fix: Phase-1-added
-    // subs persist hidden (never discard, preselected in Phase-2) — hidden
-    // mechanism is the kind filter (store.l12_status/l3_counted_ids +
-    // renderGraph mains-only), not an explicit hidden flag. Mains respect the
-    // checkbox (Deselect ≠ Delete: unchecked main excluded, row kept); subs are
-    // disabled-checked in Phase-1 UI and always sent when their parent main is
-    // selected (even if _checked toggled programmatically) so unchecking never
-    // discards user work. Orphan guard: subs of unselected mains are excluded
-    // (parent_id orphans forbidden per §6).
+    // Locks §6 (Deselect ≠ Delete) + §1/§6 parent integrity: mains respect the
+    // checkbox (unchecked main excluded, row kept); subs respect the checkbox
+    // too (unchecked sub excluded, row kept). Orphan guard: subs of unselected
+    // mains are excluded (parent_id orphans forbidden per §6). §7 kind-filter
+    // hides confirmed subs from Phase-1 math; it does not force-select them
+    // pre-Confirm.
     const checkedMains = new Set(
       pending.filter(c => (c.kind || 'main') !== 'sub' && c._checked !== false)
         .map(c => (c.concept_id || c.id))
     );
     return pending.filter(c => {
-      if ((c.kind || 'main') === 'sub') return checkedMains.has(c.parent_id);
+      if ((c.kind || 'main') === 'sub') return c._checked !== false && checkedMains.has(c.parent_id);
       return c._checked !== false;
     }).map(c => {
       const o = { ...c }; delete o._checked; return o;
@@ -270,6 +267,28 @@
     refreshFiles(); refreshState();
   }
 
+  async function doUploadBytes(fileObj) {
+    // S1 additive: real PDF bytes -> POST /upload-pdf multipart (disk +
+    // live parse). Falls back to label-only /upload on any failure so the
+    // frozen stub path never breaks. session_files stays filename-only.
+    const name = (fileObj && fileObj.name) || 'upload.pdf';
+    try {
+      const fd = new FormData();
+      fd.append('file', fileObj, name);
+      const r = await fetch('/api/sessions/' + SID + '/upload-pdf' + q(), { method: 'POST', body: fd });
+      const t = await r.text();
+      let j = {};
+      try { j = JSON.parse(t); } catch (e) { j = { detail: t }; }
+      if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+      clearFileWarn();
+    } catch (e) {
+      // Fallback: label-only frozen route (keyless demo, non-PDF, no multipart).
+      await doUpload(name);
+      return;
+    }
+    refreshFiles(); refreshState();
+  }
+
   async function init(userId, sessionId) {
     UID = userId; SID = sessionId;
     // Q2-c backup binding (graph.js also binds on DOMContentLoaded).
@@ -285,7 +304,10 @@
       picker.onchange = async () => {
         const f = picker.files && picker.files[0];
         if (!f) return;
-        try { await doUpload(f.name); } catch (e) {
+        try {
+          if (f.name && f.name.toLowerCase().endsWith('.pdf') && f.size > 0) { await doUploadBytes(f); }
+          else { await doUpload(f.name); }
+        } catch (e) {
           // doUpload already mirrored to sidebar #fileWarn + modal warnBox.
         }
         picker.value = '';
@@ -306,6 +328,13 @@
         confirmed = false;
         el('lockBox').classList.add('hidden');
         renderTree();
+        // S7: stub banner (additive, locked flows unchanged) — extra keys only.
+        try {
+          if ((j.mode || 'stub') === 'stub') {
+            el('warnBox').textContent = j.warning || 'Demo mode — stubbed, not live.';
+            el('warnBox').classList.remove('hidden');
+          }
+        } catch (e) { /* banner optional */ }
         window.CogniMapShell.openModal('Extracted Concepts');
       } catch (err) {
         // Pre-Confirm the modal is closed, so mirror to the sidebar toast.

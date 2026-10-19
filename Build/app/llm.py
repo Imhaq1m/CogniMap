@@ -17,13 +17,23 @@ session_id arriving here is already an owned session; resolvers below then
 scope all reads to that session (multi-session isolation, doc-scope
 grounding). Real model implementations MUST repeat the ownership check
 first (see Steps_Locks §8).
+
+S1 live (additive): extract_concepts tries Gemini chain
+  gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash -> stub
+behind env flags (LLM_PROVIDER=gemini + GOOGLE_API_KEY). Keyless stays stub.
+List return shape frozen; mode/model/fallback_reason travel out-of-band via
+extract_concepts_with_status (routes use it for labelling, never 502).
+Prompt texts live in this module for the FYP write-up (S7).
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 
-from . import store
+from . import config, store
+
+log = logging.getLogger("cognimap.llm")
 
 SEED_PATH = os.path.join(os.path.dirname(__file__), "seed.json")
 
@@ -36,8 +46,60 @@ def load_seed_concepts() -> list[dict]:
     return data if isinstance(data, list) else []
 
 
-# 1. extract_concepts(markdown, figures) -> ConceptsJSON (§1 shape + Q4)
-def extract_concepts(markdown: str, figures: list[dict] | None = None) -> list[dict]:
+# ---------------------------------------------------------------------------
+# S1 P1 prompts (S9 draft, model-agnostic JSON-only, stable-prefix-first for
+# implicit caching: stable RULES/system first, variable MARKDOWN/FIGURES last).
+# ---------------------------------------------------------------------------
+
+P1_SYSTEM = (
+    "Extract study concepts from course docs only, no external knowledge. "
+    "Synthesize scope-grounded text when missing, mark generated + cite pages. "
+    "If partial say partial. "
+    "Output JSON list only. Each item MUST have: concept_id (unique string), "
+    "title, kind (main|sub), parent_id (null for main, main concept_id for sub), "
+    "source (always extracted — never user_added), explanation_type "
+    "(definition|procedure|framework|principle), explanation_text (always "
+    "non-empty; use only parsed markdown/figures, cite pages), "
+    "explanation_source (extracted|generated), pages (list of ints, may be []), "
+    "diagram_refs (list of {diagram_id, page} linked via page overlap with "
+    "FIGURES_JSON), diagram_description (figure caption bridge, may be empty). "
+    "Link figures via page overlap. Never output user_added rows."
+)
+
+P1_RULES = (
+    "RULES: JSON list only. Fields: concept_id/title/kind:main|sub/parent_id/"
+    "source:extracted/explanation_type/explanation_text/explanation_source:"
+    "extracted|generated/pages/diagram_refs/diagram_description. "
+    "Guardrail: use only parsed markdown/figures, no external knowledge, "
+    "cite pages, if partial say partial."
+)
+
+
+def build_p1_user(markdown: str, figures: list[dict] | None) -> str:
+    figs = figures or []
+    # Truncate markdown to keep demo prompts bounded (full doc still sent when short).
+    md = (markdown or "")[:12000]
+    try:
+        figs_json = json.dumps(
+            [
+                {
+                    "diagram_id": f.get("diagram_id"),
+                    "page": f.get("page"),
+                    "caption": (f.get("caption") or "")[:300],
+                }
+                for f in figs
+            ][:20]
+        )
+    except Exception:
+        figs_json = "[]"
+    return f"{P1_RULES}\n\nMARKDOWN:\n{md}\n\nFIGURES_JSON:\n{figs_json}"
+
+
+# ---------------------------------------------------------------------------
+# Stub core (frozen behaviour, seed-grounded).
+# ---------------------------------------------------------------------------
+
+def _stub_extract_concepts(markdown: str, figures: list[dict] | None = None) -> list[dict]:
     """Stub wired to figures (Locks §1 Q4 + §8).
 
     Demo-blue note (Locks §1 provenance): seed.json c6 is a demo-blue row
@@ -88,6 +150,191 @@ def extract_concepts(markdown: str, figures: list[dict] | None = None) -> list[d
                 by_id[fid]["image_path"] = f"/static/diagrams/{fid}.png"
         out.append(d)
     return out
+
+
+# ---------------------------------------------------------------------------
+# S1 validation (strict shape check on live JSON).
+# ---------------------------------------------------------------------------
+
+_VALID_KINDS = {"main", "sub"}
+_VALID_EXP_TYPES = {"definition", "procedure", "framework", "principle"}
+_VALID_EXP_SRC = {"extracted", "generated"}
+
+
+def validate_extract_shape(concepts: object) -> list[dict]:
+    """Strict shape check (per supervisor-demo decision).
+
+    Rules: list, ids unique non-empty, kind main|sub, parent integrity
+    (main parent None, sub parent is a selected main), source MUST be
+    extracted (never user_added from the extractor), explanation_text
+    non-empty, explanation_source extracted|generated, pages list,
+    diagram_refs list of {diagram_id, page}.
+    Raises ValueError(reason) on any failure -> caller falls back to stub.
+    """
+    if not isinstance(concepts, list) or not concepts:
+        raise ValueError("live JSON must be a non-empty list")
+    seen: set[str] = set()
+    mains: set[str] = set()
+    for c in concepts:
+        if not isinstance(c, dict):
+            raise ValueError("live item must be an object")
+        cid = str(c.get("concept_id") or c.get("id") or "").strip()
+        if not cid:
+            raise ValueError("live item missing concept_id")
+        if cid in seen:
+            raise ValueError(f"duplicate concept id: {cid}")
+        seen.add(cid)
+        if c.get("kind") not in _VALID_KINDS:
+            raise ValueError(f"bad kind for {cid}")
+        if c.get("kind") == "main":
+            mains.add(cid)
+        if not str(c.get("title") or "").strip():
+            raise ValueError(f"missing title for {cid}")
+        if c.get("source") != "extracted":
+            raise ValueError(f"live extractor must output extracted only ({cid})")
+        if c.get("explanation_type") not in _VALID_EXP_TYPES:
+            raise ValueError(f"bad explanation_type for {cid}")
+        if not str(c.get("explanation_text") or "").strip():
+            raise ValueError(f"missing explanation_text for {cid}")
+        if c.get("explanation_source") not in _VALID_EXP_SRC:
+            raise ValueError(f"bad explanation_source for {cid}")
+        pages = c.get("pages")
+        if not isinstance(pages, list):
+            raise ValueError(f"pages must be a list for {cid}")
+        refs = c.get("diagram_refs")
+        if refs is None:
+            c["diagram_refs"] = []
+        elif not isinstance(refs, list):
+            raise ValueError(f"diagram_refs must be a list for {cid}")
+        else:
+            for r in refs:
+                if not isinstance(r, dict) or not str(r.get("diagram_id") or "").strip():
+                    raise ValueError(f"bad diagram_ref for {cid}")
+        c.setdefault("diagram_description", "")
+        c.setdefault("parent_id", None)
+    # Parent integrity (second pass so forward refs work).
+    for c in concepts:  # type: ignore[union-attr]
+        cid = str(c.get("concept_id") or c.get("id") or "").strip()  # type: ignore[union-attr]
+        if c.get("kind") == "sub":  # type: ignore[union-attr]
+            parent = c.get("parent_id")  # type: ignore[union-attr]
+            if not parent or parent not in mains:
+                raise ValueError(f"sub {cid} needs a selected main parent")
+        else:
+            c["parent_id"] = None  # type: ignore[index]
+    if not mains:
+        raise ValueError("live JSON needs >=1 main (Confirm guard)")
+    return concepts  # type: ignore[return-value]
+
+
+def _strip_code_fences(text: str) -> str:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        # Remove ```json ... ``` fences.
+        lines = t.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        t = "\n".join(lines).strip()
+    return t
+
+
+def _gemini_generate(model: str, system: str, user: str, api_key: str, timeout_s: int) -> str:
+    """One Gemini call. Raises on 429/5xx/network so the chain can advance."""
+    from google import genai  # type: ignore
+    from google.genai import types  # type: ignore
+
+    client = genai.Client(api_key=api_key)
+    try:
+        resp = client.models.generate_content(
+            model=model,
+            contents=user,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                temperature=0.2,
+                response_mime_type="application/json",
+            ),
+        )
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+    _ = timeout_s
+    text = getattr(resp, "text", "") or ""
+    if not text.strip():
+        raise ValueError(f"{model} returned empty response")
+    return text
+
+
+def extract_concepts_with_status(
+    markdown: str, figures: list[dict] | None = None
+) -> dict:
+    """S1 live chain + labelled fallback (additive, never raises).
+
+    Returns {concepts, mode: live|stub, model, fallback_reason}.
+    Chain: LLM_MODELS order (default 3.8 -> 3.7 -> 3.6) -> stub.
+    On 429/5xx/bad-JSON/validation fail, advance to next link; after all
+    fail, seed-grounded stub. Never 502 in demo. Logs fallback_reason
+    server-side without keys.
+    """
+    figs = list(figures or [])
+    if not config.is_llm_live():
+        concepts = _stub_extract_concepts(markdown, figs)
+        reason = "stub-default (no LLM key)"
+        log.info("extract: mode=stub reason=%s", reason)
+        return {"concepts": concepts, "mode": "stub", "model": "stub", "fallback_reason": reason}
+    api_key = config.get_google_key() or ""
+    models = config.get_llm_models()
+    user_prompt = build_p1_user(markdown, figs)
+    last_reason = ""
+    for model in models:
+        try:
+            log.info("extract: trying live model=%s", model)
+            raw = _gemini_generate(model, P1_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S)
+            cleaned = _strip_code_fences(raw)
+            try:
+                data = json.loads(cleaned)
+            except Exception as e:
+                last_reason = f"{model}: bad JSON ({type(e).__name__})"
+                log.warning("extract: %s", last_reason)
+                continue
+            # Accept bare list or {concepts: [...]} wrapper.
+            if isinstance(data, dict) and isinstance(data.get("concepts"), list):
+                data = data["concepts"]
+            try:
+                concepts = validate_extract_shape(data)
+            except ValueError as e:
+                last_reason = f"{model}: validation failed ({e})"
+                log.warning("extract: %s", last_reason)
+                continue
+            log.info("extract: live ok model=%s n=%d", model, len(concepts))
+            return {"concepts": concepts, "mode": "live", "model": model, "fallback_reason": ""}
+        except Exception as e:
+            # 429/5xx/network/auth — advance the chain, never 502.
+            last_reason = f"{model}: {type(e).__name__}: {str(e)[:200]}"
+            log.warning("extract: %s", last_reason)
+            continue
+    concepts = _stub_extract_concepts(markdown, figs)
+    reason = last_reason or "all live models failed — stub fallback"
+    log.warning("extract: mode=stub reason=%s", reason)
+    return {"concepts": concepts, "mode": "stub", "model": "stub", "fallback_reason": reason}
+
+
+# 1. extract_concepts(markdown, figures) -> ConceptsJSON (§1 shape + Q4)
+def extract_concepts(markdown: str, figures: list[dict] | None = None) -> list[dict]:
+    """Frozen §8 signature: returns list only (labelling out-of-band).
+
+    Live behind env flags; keyless/bad-key/bad-JSON always falls back to the
+    seed-grounded stub so the supervisor demo never breaks. Routes needing
+    mode/model/warning use extract_concepts_with_status.
+    """
+    return extract_concepts_with_status(markdown, figures)["concepts"]
+
+
+def llm_status() -> dict:
+    """Additive health fragment: {llm: live|stub, llm_model}."""
+    return config.llm_status()
 
 
 # 2. evaluate_paraphrase(session_id, concept_id, paraphrase) -> {passed,...}

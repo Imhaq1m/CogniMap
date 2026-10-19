@@ -7,33 +7,33 @@ Update by editing the section checkboxes. Do not delete history.
 Ground rules (frozen, do not break)
 -----------------------------------
 - [x] Seed demo E2E works with no keys (TODO_Locks.md Integration done, pytest Build/tests green)
-- [ ] Live paths are additive only. Frozen: Build/app/models.py:1 (session_id-only schema), Build/app/store.py ownership via sessions join, Build/app/main.py routes/state-machine, Locks section 8 signatures in Build/app/parse.py:12 + Build/app/llm.py:40
-- [ ] No UI shape break on swap (extra response keys allowed, required keys unchanged)
-- [ ] Every server LLM call first checks sessions.user_id == requester, then resolves by owned (session_id, concept/link/scenario_id). Never trust raw client text (Steps_Locks.md section 8).
+- [x] Live paths are additive only. Frozen: Build/app/models.py:1 (session_id-only schema), Build/app/store.py ownership via sessions join, Build/app/main.py routes/state-machine, Locks section 8 signatures in Build/app/parse.py:12 + Build/app/llm.py:40 (S1: config.py + parse/llm additive, store/models untouched, 42 passed keyless)
+- [x] No UI shape break on swap (extra response keys allowed, required keys unchanged) (S1: health/extract/upload parsed add mode/model/warning only)
+- [x] Every server LLM call first checks sessions.user_id == requester, then resolves by owned (session_id, concept/link/scenario_id). Never trust raw client text (Steps_Locks.md section 8). (S1: extract route keeps _owned gate; P1 takes doc markdown/figures only, no session ids to resolve)
 
 Env / config (cross-cutting)
 -----------------------------
 Files: Build/requirements.txt:5 (llamaparse deferred), Build/app/parse.py, Build/app/llm.py, gitignored .env
 Decision: Gemini Developer API, chain gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash -> stub (verified endpoints Oct 2026; 3.8 most intelligent Flash, 3.7/3.6 prior stable).
-- [ ] Add deps: llama-parse client, google-genai (NOT legacy google-generativeai), python-dotenv
-- [ ] Env names locked: LLAMA_CLOUD_API_KEY, LLM_PROVIDER=gemini, GOOGLE_API_KEY (accept GEMINI_API_KEY alias), LLM_MODELS=gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash, LLAMA_TIER (agentic|agentic_plus)
-- [ ] .env gitignored, os.environ only, CI green with no keys (live tests skip)
-- [ ] GET /api/health reports {step, llama: live|stub, llm: live|stub, llm_model: which chain link served} (additive fields only)
-- [ ] Document key setup for supervisor machine (which .env, no keys in repo)
+- [x] Add deps: llama-parse client, google-genai (NOT legacy google-generativeai), python-dotenv
+- [x] Env names locked: LLAMA_CLOUD_API_KEY, LLM_PROVIDER=gemini, GOOGLE_API_KEY (accept GEMINI_API_KEY alias), LLM_MODELS=gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash, LLAMA_TIER (agentic|agentic_plus)
+- [x] .env gitignored, os.environ only, CI green with no keys (live tests skip)
+- [x] GET /api/health reports {step, llama: live|stub, llm: live|stub, llm_model: which chain link served} (additive fields only)
+- [x] Document key setup for supervisor machine (which .env, no keys in repo)
 
 [S1] CURRENT — Parsing + Extract (grilled, implement first)
 ------------------------------------------------------------
 Files: Build/app/parse.py:12 llamaparse_stub / Build/app/parse.py:44 parse_pdf, Build/app/llm.py:40 extract_concepts, Build/app/main.py:557 upload / Build/app/main.py:588 extract / Build/app/main.py:528 seed-load, Build/app/seed.json:1
 Grill status: DONE (provider=env-swappable, parse=hybrid keep-seed, keys=.env, scope=extract-only, bad-json=fallback-on-anything, honesty=labelled)
-- [ ] parse_pdf(file, pdf_bytes=None): try LlamaParse tier LLAMA_TIER (default agentic, agentic_plus for complex), images_to_save ["screenshot"], expand [text, markdown, items, images_content_metadata]. Cost-optimizer allowed.
-- [ ] Upload bytes: keep POST /upload {file: label} frozen; add POST /upload-pdf multipart -> Build/uploads/{sid}/{filename} (disk only, no store.py schema change). session_files stays filename-only.
-- [ ] Diagrams: parse layer writes /static/diagrams/{diagram_id}.png when screenshot present; absent file -> description-only, no breakage (Locks section 0).
-- [ ] extract_concepts(markdown, figures): live prompt enforces Steps_Locks.md section 1 shape (concept_id/title/kind/parent/source/explanation_type/text/source/pages/diagram_refs/diagram_description). Rules: extracted rows only (never user_added), always fill explanation_text (Q5=B, extracted|generated + pages cite), Q4 figure linking, guardrail "use only parsed markdown/figures, no external knowledge, cite pages, if partial say partial".
-- [ ] Fallback chain (Gemini): try gemini-3.8-flash -> on 429/5xx/bad-JSON try gemini-3.7-flash -> gemini-3.6-flash -> stub (seed-grounded). Record served model + reason. Never 502 in demo.
-- [ ] Labelling: keep list return shape; add mode/fallback_reason out-of-band — parse dict adds mode + fallback_reason keys; POST /extract adds "mode" + "model" (which chain link) + "warning: Demo mode (stubbed) ..." alongside concepts/parsed. Log fallback_reason server-side.
-- [ ] Validation: strict shape check on live JSON (ids unique, kind main|sub, parent integrity); on fail -> fallback to stub + record reason (per supervisor-demo decision).
-- [ ] Tests: stub tests unchanged; new live tests skip without keys; new fallback tests force bad-key/bad-JSON -> assert stub shape + mode=stub.
-- [ ] DONE = real PDF -> live markdown/figures -> live concepts render in Extract modal; keyless run still shows seed modal; Confirm still guards >=1 main.
+- [x] parse_pdf(file, pdf_bytes=None): try LlamaParse tier LLAMA_TIER (default agentic, agentic_plus for complex), images_to_save ["screenshot"], expand [text, markdown, items, images_content_metadata]. Cost-optimizer allowed.
+- [x] Upload bytes: keep POST /upload {file: label} frozen; add POST /upload-pdf multipart -> Build/uploads/{sid}/{filename} (disk only, no store.py schema change). session_files stays filename-only.
+- [x] Diagrams: parse layer writes /static/diagrams/{diagram_id}.png when screenshot present; absent file -> description-only, no breakage (Locks section 0).
+- [x] extract_concepts(markdown, figures): live prompt enforces Steps_Locks.md section 1 shape (concept_id/title/kind/parent/source/explanation_type/text/source/pages/diagram_refs/diagram_description). Rules: extracted rows only (never user_added), always fill explanation_text (Q5=B, extracted|generated + pages cite), Q4 figure linking, guardrail "use only parsed markdown/figures, no external knowledge, cite pages, if partial say partial".
+- [x] Fallback chain (Gemini): try gemini-3.8-flash -> on 429/5xx/bad-JSON try gemini-3.7-flash -> gemini-3.6-flash -> stub (seed-grounded). Record served model + reason. Never 502 in demo.
+- [x] Labelling: keep list return shape; add mode/fallback_reason out-of-band — parse dict adds mode + fallback_reason keys; POST /extract adds "mode" + "model" (which chain link) + "warning: Demo mode (stubbed) ..." alongside concepts/parsed. Log fallback_reason server-side.
+- [x] Validation: strict shape check on live JSON (ids unique, kind main|sub, parent integrity); on fail -> fallback to stub + record reason (per supervisor-demo decision).
+- [x] Tests: stub tests unchanged; new live tests skip without keys; new fallback tests force bad-key/bad-JSON -> assert stub shape + mode=stub.
+- [x] DONE = real PDF -> live markdown/figures -> live concepts render in Extract modal; keyless run still shows seed modal; Confirm still guards >=1 main. (verified with keys: tiny PDF -> parse live agentic -> extract live gemini-3.8-flash, 3 concepts, shape-valid; keyless stub + Confirm guards covered by pytest)
 
 [S2] NEXT — L1-2 evaluate_paraphrase (future grill)
 ----------------------------------------------------
@@ -68,20 +68,20 @@ Files: Build/app/llm.py:236 probe_link, Build/app/main.py:903 probe, Build/app/s
 
 [S6] Upload / files / diagrams (cross-cutting, part of S1, reused later)
 --------------------------------------------------------------------------
-- [ ] Decide: Build/uploads/ cleanup on session delete + last-file reset (clear_session_data path)
-- [ ] Limits: max PDF size, page cap for agentic_plus escalation, timeout values
-- [ ] Static: confirm /static/diagrams/{id}.png serving + mtime cache-bust (_sv in main.py:45)
+- [x] Decide: Build/uploads/ cleanup on session delete + last-file reset (clear_session_data path)
+- [x] Limits: max PDF size, page cap for agentic_plus escalation, timeout values
+- [x] Static: confirm /static/diagrams/{id}.png serving + mtime cache-bust (_sv in main.py:45)
 
 [S7] Observability / supervisor demo
 --------------------------------------
-- [ ] Log live prompts + fallback_reason (no keys logged); keep prompt texts in one module for FYP write-up
-- [ ] UI banner when mode=stub ("Demo mode — stubbed, not live") without breaking locked flows
-- [ ] Demo checklist: keyless run, live run, forced-fallback run (bad key), each recorded
+- [x] Log live prompts + fallback_reason (no keys logged); keep prompt texts in one module for FYP write-up
+- [x] UI banner when mode=stub ("Demo mode — stubbed, not live") without breaking locked flows
+- [x] Demo checklist: keyless run, live run, forced-fallback run (bad key), each recorded (keyless + forced-fallback via pytest; live verified with keys: parse live + extract live 3.8-flash)
 
 [S8] Testing / reviewer gates
 -------------------------------
-- [ ] Keep pytest Build/tests green keyless (isolated COGNIMAP_DB pattern in Build/tests/test_locks.py:14)
-- [ ] New: test_live_skip (skipif no key), test_fallback_labels (bad key/JSON -> stub + mode), test_extract_shape (live or stub both pass Confirm guards)
+- [x] Keep pytest Build/tests green keyless (isolated COGNIMAP_DB pattern in Build/tests/test_locks.py:14)
+- [x] New: test_live_skip (skipif no key), test_fallback_labels (bad key/JSON -> stub + mode), test_extract_shape (live or stub both pass Confirm guards)
 - [ ] Reviewer per slice vs Steps_Locks.md (counts, lock-passed, Finish, trail writes)
 
 Rollout order
@@ -91,12 +91,12 @@ Rollout order
 [S9] Prompts per stage (draft, model-agnostic JSON-only)
 ---------------------------------------------------------
 All server-side: resolve text by owned ids first, never trust client text, then inject into {braces}.
-- [ ] P1 extract_concepts(markdown, figures): system "extract study concepts from course docs only, no external knowledge; synthesize scope-grounded text when missing, mark generated + cite pages; if partial say partial." User injects MARKDOWN + FIGURES_JSON + RULES (JSON list only, fields concept_id/title/kind:main|sub/parent_id/source:extracted/explanation_type/explanation_text/explanation_source:extracted|generated/pages/diagram_refs/diagram_description; link figures via page overlap; never user_added). Retry once on bad JSON -> stub fallback.
+- [x] P1 extract_concepts(markdown, figures): system "extract study concepts from course docs only, no external knowledge; synthesize scope-grounded text when missing, mark generated + cite pages; if partial say partial." User injects MARKDOWN + FIGURES_JSON + RULES (JSON list only, fields concept_id/title/kind:main|sub/parent_id/source:extracted/explanation_type/explanation_text/explanation_source:extracted|generated/pages/diagram_refs/diagram_description; link figures via page overlap; never user_added). Retry once on bad JSON -> stub fallback. (implemented in llm.py: P1_SYSTEM + build_p1_user, chain advances on bad JSON)
 - [ ] P2 evaluate_paraphrase: system "lenient tutor, meaning over wording, hints never answers." User injects REFERENCE explanation_text + TYPE + PAGES + DIAGRAM + STUDENT paraphrase -> {passed,accuracy,originality,feedback,hint}. Pass if core meaning in own words. Blue user_added: skip prompt, code bypass with plausibility-check + warning_ack.
 - [ ] P3 generate_scenario: system "verbalize only, do not invent concepts." User injects CHUNK_IDS (2-3, 1 only if n==1) + CONTEXT + MAINS_BACKGROUND display-only -> {scenario_id,text,concept_ids:chunk unchanged}. App validates ids == chunk.
 - [ ] P4 evaluate_scenario: system "grade per-selection vs scenario facts + reference; tier 1 wrong-concept not-related, tier 2 right-concept wrong-justification hint, tier 3 pass." Per-selection inject SCENARIO + CONCEPT title/text/pages + JUSTIFICATION + BLUE flag (user text as ground, prefix "user-defined — plausibility check, not doc-cited"). Return {concept_id,passed,feedback,hint}. App computes missed_ids + cleared (missed empty AND all passed).
 - [ ] P5 probe_link: system "probing analyst, grade Why/Fail independently, side-targeted hints." Inject EDGE A -type-> B + A_REF + B_REF + BLUE flag + WHY_ANSWER + FAIL_ANSWER -> {why_passed,why_feedback,why_hint,fail_passed,fail_feedback,fail_hint}. Same prompts for custom edges. App brightens only when both true.
-- [ ] Provider syntax (Gemini): google-genai SDK, response_mime_type="application/json", low temperature (0.2-0.3) for extract/eval determinism, system_instruction carries the system lines above. Same prompt text for 3.8/3.7/3.6 — no per-model prompt fork. No function-calling dependency.
+- [x] Provider syntax (Gemini): google-genai SDK, response_mime_type="application/json", low temperature (0.2-0.3) for extract/eval determinism, system_instruction carries the system lines above. Same prompt text for 3.8/3.7/3.6 — no per-model prompt fork. No function-calling dependency.
 - [x] Caching (locked): implicit-only, stable-prefix-first. All three chain models support implicit (default on, min 4096 tokens, savings auto via usage.total_cached_tokens) + explicit, but explicit deferred (extra lifecycle; caches don't share across 3.8/3.7/3.6 fallback). Keep stable content first + variable answers last in P1-P5 to maximise hit chance; extract (full markdown) is the only call likely to hit.
 
 Open questions for next grilling

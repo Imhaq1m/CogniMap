@@ -26,13 +26,17 @@ Shapes from models.py unchanged (session_id-only, user_id via sessions join).
 from __future__ import annotations
 
 import json
+import logging
 import os
-from fastapi import FastAPI, HTTPException
+import shutil
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import llm, parse, store
+from . import config, llm, parse, store
+
+log = logging.getLogger("cognimap.main")
 
 app = FastAPI(title="CogniMap Steps0-6")
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
@@ -323,7 +327,7 @@ def workspace_page(user_id: int, session_id: str) -> str:
 <button class="btn primary" id="toL5Btn">Continue to Level 5</button>
 </div></div>
 <div id="probemodal"><div class="modal-box modal-wide">
-<div class="modal-head"><h3 id="probeTitle">Probe</h3><button class="btn sm" id="probeX">x</button></div>
+<div class="modal-head"><h3 id="probeTitle">Probe</h3><button class="btn sm" id="probeX" title="Close" aria-label="Close">×</button></div>
 <label><b>Why does this relationship exist?</b></label>
 <textarea id="probeWhy" rows="3"></textarea>
 <div id="probeWhyFb"></div>
@@ -385,7 +389,12 @@ def workspace(user_id: int, session_id: str):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "step": _current_step()}
+    # S1 additive: {step, llama: live|stub, llm: live|stub, llm_model}.
+    # Frozen keys ok/step kept; extra keys allowed, required keys unchanged.
+    out: dict = {"ok": True, "step": _current_step()}
+    out.update(parse.parse_status())
+    out.update(llm.llm_status())
+    return out
 
 
 @app.get("/api/seed")
@@ -412,14 +421,21 @@ def api_delete_user(user_id: int):
 
     Deletes the user + all their sessions/data (sessions + session_files +
     concepts/links/scenarios/trail via store.delete_user). Missing user 404s.
+    S6: also removes Build/uploads/{sid}/ dirs for owned sessions.
     """
     try:
         uid = int(user_id)
     except (TypeError, ValueError):
         raise HTTPException(404, "no such user")
+    try:
+        sids = [s["id"] for s in store.list_sessions(uid)]
+    except Exception:
+        sids = []
     ok = store.delete_user(uid)
     if not ok:
         raise HTTPException(404, "no such user")
+    for sid in sids:
+        _remove_uploads_session_dir(sid)
     return {"deleted": True, "user_id": uid}
 
 
@@ -457,12 +473,36 @@ def api_create_session(payload: SessionIn):
     return store.create_session(uid, payload.file)
 
 
+def _uploads_session_dir(session_id: str) -> str:
+    # S1/S6: Build/uploads/{sid}/ (disk only, no store schema change).
+    d = os.path.join(config.upload_root(), str(session_id))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _remove_uploads_session_dir(session_id: str) -> None:
+    try:
+        shutil.rmtree(os.path.join(config.upload_root(), str(session_id)), ignore_errors=True)
+    except Exception as e:
+        log.warning("uploads cleanup skipped %s: %s", session_id, e)
+
+
+def _remove_upload_file(session_id: str, filename: str) -> None:
+    try:
+        p = os.path.join(config.upload_root(), str(session_id), str(filename))
+        if os.path.isfile(p):
+            os.remove(p)
+    except Exception as e:
+        log.warning("uploads file cleanup skipped %s/%s: %s", session_id, filename, e)
+
+
 @app.delete("/api/sessions/{session_id}")
 def api_delete_session(session_id: str, user_id: int | None = None):
     """Delete session cascade (Locks §0/§6): ownership-checked.
 
     Deletes session_files + scoped domain rows (concepts/links/scenarios/
     trail) + the sessions row. Cross-user deletes 404 (no leak).
+    S6: also removes Build/uploads/{sid}/ from disk.
     """
     try:
         s = store.require_owned_session(session_id, user_id)
@@ -476,6 +516,7 @@ def api_delete_session(session_id: str, user_id: int | None = None):
         raise HTTPException(404, str(e))
     if not ok:
         raise HTTPException(404, "no such session")
+    _remove_uploads_session_dir(session_id)
     return {"deleted": True, "session_id": session_id}
 
 
@@ -575,14 +616,65 @@ def api_remove_file(session_id: str, filename: str | None = None,
     """Per-file remove (Locks §6): ?filename= removes one row and keeps data
     while files remain; removing the last file full-wipes via
     clear_session_data. Legacy callers without ?filename= remove the primary
-    label (single-file sessions still full-wipe as before)."""
+    label (single-file sessions still full-wipe as before).
+    S6: disk copy under Build/uploads/{sid}/ removed as well; last-file reset
+    removes the whole session dir."""
     s = _owned(session_id, user_id)
     try:
-        return store.remove_file(session_id, filename, user_id=int(s["user_id"]))
+        out = store.remove_file(session_id, filename, user_id=int(s["user_id"]))
     except PermissionError as e:
         raise HTTPException(404, str(e))
     except KeyError:
         raise HTTPException(404, "no such session")
+    try:
+        if out.get("reset"):
+            _remove_uploads_session_dir(session_id)
+        elif filename:
+            _remove_upload_file(session_id, (filename or "").strip())
+    except Exception as e:
+        log.warning("uploads cleanup skipped: %s", e)
+    return out
+
+
+@app.post("/api/sessions/{session_id}/upload-pdf")
+def api_upload_pdf(session_id: str, user_id: int | None = None,
+                   file: UploadFile | None = File(None)):
+    """S1 upload bytes (additive): multipart PDF -> Build/uploads/{sid}/{filename}.
+
+    Frozen POST /upload {file: label} unchanged; this endpoint adds real bytes
+    for the live LlamaParse path. Disk only, no store.py schema change —
+    session_files stays filename-only. Limits: MAX_PDF_BYTES (S6).
+    """
+    s = _owned(session_id, user_id)
+    if (s.get("stage") or "") != "steps1-2":
+        raise HTTPException(400, "already locked — concepts lock after Confirm")
+    if file is None or not (file.filename or "").strip():
+        raise HTTPException(400, "pdf file required (multipart field 'file')")
+    filename = os.path.basename((file.filename or "").strip()) or "upload.pdf"
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "only .pdf accepted here (labels still via /upload)")
+    try:
+        data = file.file.read()
+    except Exception:
+        raise HTTPException(400, "could not read upload")
+    if not data:
+        raise HTTPException(400, "empty pdf")
+    if len(data) > config.MAX_PDF_BYTES:
+        raise HTTPException(400, f"pdf over {config.MAX_PDF_BYTES} bytes")
+    sdir = _uploads_session_dir(session_id)
+    dest = os.path.join(sdir, filename)
+    try:
+        with open(dest, "wb") as fh:
+            fh.write(data)
+    except Exception as e:
+        raise HTTPException(500, f"could not save upload: {e}")
+    # Live parse attempt with bytes (falls back to stub, never 502).
+    parsed = parse.parse_pdf(filename, pdf_bytes=data)
+    if parsed.get("mode") != "live" and parsed.get("fallback_reason"):
+        log.warning("upload-pdf fallback %s: %s", filename, parsed.get("fallback_reason"))
+    session = store.add_file(session_id, filename)
+    return {"file": filename, "parsed": parsed, "session": session,
+            "files": store.list_files(session_id)}
 
 
 @app.post("/api/sessions/{session_id}/extract")
@@ -593,9 +685,32 @@ def api_extract(session_id: str, user_id: int | None = None):
         raise HTTPException(400, "already locked — concepts lock after Confirm")
     if not (s.get("file") or "").strip():
         raise HTTPException(400, "upload a file first (Select Files)")
-    parsed = parse.parse_pdf(s["file"])
-    concepts = llm.extract_concepts(parsed["markdown"], parsed["figures"])
-    return {"concepts": concepts, "parsed": {"file": parsed["file"], "pages": parsed["pages"]}}
+    # S1: prefer disk bytes for live parse when present (upload-pdf path);
+    # label-only sessions stay stub (frozen /upload path, no breakage).
+    pdf_bytes: bytes | None = None
+    try:
+        cand = os.path.join(config.upload_root(), str(session_id), str(s["file"]))
+        if os.path.isfile(cand) and os.path.getsize(cand) <= config.MAX_PDF_BYTES:
+            with open(cand, "rb") as fh:
+                pdf_bytes = fh.read()
+    except Exception as e:
+        log.warning("extract disk read skipped: %s", e)
+        pdf_bytes = None
+    parsed = parse.parse_pdf(s["file"], pdf_bytes=pdf_bytes)
+    status = llm.extract_concepts_with_status(parsed.get("markdown", ""), parsed.get("figures"))
+    concepts = status["concepts"]
+    mode = status.get("mode") or "stub"
+    model = status.get("model") or "stub"
+    if status.get("fallback_reason"):
+        log.warning("extract fallback %s: %s", s["file"], status.get("fallback_reason"))
+    out: dict = {"concepts": concepts,
+                 "parsed": {"file": parsed.get("file"), "pages": parsed.get("pages"),
+                            "mode": parsed.get("mode", "stub"),
+                            "fallback_reason": parsed.get("fallback_reason", "")},
+                 "mode": mode, "model": model}
+    if mode == "stub":
+        out["warning"] = "Demo mode (stubbed) — connect keys for live parse/extract."
+    return out
 
 
 @app.post("/api/sessions/{session_id}/confirm-selection")
