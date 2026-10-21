@@ -19,9 +19,9 @@ grounding). Real model implementations MUST repeat the ownership check
 first (see Steps_Locks §8).
 
 S1 live (additive): extract_concepts tries the configured provider chain behind
-env flags (S2b default: glm-4.7-flash -> stub; archived: LLM_PROVIDER=gemini
-runs gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash). Keyless stays
-stub.
+env flags (S2c default: qwen/qwen3.8-27b on Groq -> stub; archived:
+LLM_PROVIDER=gemini runs gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash).
+Keyless stays stub.
 List return shape frozen; mode/model/fallback_reason travel out-of-band via
 extract_concepts_with_status (routes use it for labelling, never 502).
 S2 live (additive): evaluate_paraphrase uses the same chain with a balanced
@@ -60,8 +60,9 @@ def load_seed_concepts() -> list[dict]:
 P1_SYSTEM = (
     "Extract study concepts from course docs only, no external knowledge. "
     "Synthesize scope-grounded text when missing, mark generated + cite pages. "
-    "If partial say partial. "
-    "Output JSON list only. Each item MUST have: concept_id (unique string), "
+    "If partial say partial. Keep the set focused: about 4-8 rows, the most "
+    "important terms. explanation_text is ONE short sentence (max ~160 chars). "
+    "Output a compact JSON list only, no pretty printing. Each item MUST have: concept_id (unique string), "
     "title, kind (main|sub), parent_id (null for main, main concept_id for sub), "
     "source (always the literal string extracted — never user_added, never "
     "generated — generated text belongs in explanation_source), explanation_type "
@@ -115,8 +116,9 @@ P2_ORIGINALITY_BANDS = ("Own words", "Too close to source")
 P2_SYSTEM = (
     "You are a lenient tutor grading a student's paraphrase of one course "
     "concept. Judge meaning over wording. Pass ONLY when BOTH hold: "
-    "(1) accuracy is 'Accurate' — the core meaning is correct and nothing "
-    "contradicts the reference; minor omissions are allowed; and (2) "
+    "(1) accuracy is 'Accurate' — the answer captures the central idea and "
+    "nothing contradicts the reference; missing supporting details that the "
+    "richer reference happens to include do NOT downgrade the band; and (2) "
     "originality is 'Own words' — the student restructured the sentence and "
     "explained it in their own phrasing. Shared technical terms and short "
     "stock phrases are expected and do NOT make an answer too close. Mark "
@@ -126,7 +128,8 @@ P2_SYSTEM = (
     "REFERENCE; no external knowledge. If the answer is partial, say what is "
     "missing without revealing the answer. Output one JSON object only with: "
     "passed (bool), accuracy (Accurate|Partly accurate|Inaccurate), "
-    "originality (Own words|Too close to source), feedback (1-2 sentences), "
+    "originality (Own words|Too close to source), feedback (ONE short sentence, "
+    "max ~140 chars), "
     "hint. passed MUST equal (accuracy == 'Accurate' AND originality == 'Own "
     "words'). On pass hint must be \"\". On fail hint is ONE short nudge "
     "that points at the missing idea or asks for own wording and NEVER "
@@ -137,11 +140,15 @@ P2_RULES = (
     "RULES: JSON object only. accuracy exactly one of Accurate|Partly "
     "accurate|Inaccurate. originality exactly one of Own words|Too close to "
     "source. Pass only when accuracy=Accurate and originality=Own words. "
-    "Minor omissions are okay when the core meaning is right. Be lenient on "
+    "A shorter answer that still captures the central idea is Accurate; "
+    "reserve Partly accurate for answers where the central idea itself is "
+    "missing or muddled, and Inaccurate for wrong or contradictory answers. "
+    "Be lenient on "
     "originality: technical terms and short stock phrases are fine; only "
     "near-verbatim copying of most of the reference is Too close. feedback "
-    "is 1-2 sentences, lenient, and never gives the answer. hint is empty on "
-    "pass; on fail it is ONE nudge that never reveals the reference answer. "
+    "is ONE short sentence (max ~140 chars), lenient, and never gives the "
+    "answer. hint is empty on pass; on fail it is ONE nudge that never "
+    "reveals the reference answer. "
     "Ground only in REFERENCE."
 )
 
@@ -270,10 +277,10 @@ def validate_extract_shape(concepts: object) -> list[dict]:
         if not str(c.get("title") or "").strip():
             raise ValueError(f"missing title for {cid}")
         if c.get("source") == "generated":
-            # Model conflation (observed on GLM-4.7-Flash): `source` is row
-            # provenance (extracted vs user_added); synthesized text belongs
-            # in explanation_source. Coerce this one value; still reject
-            # user_added/garbage.
+            # Model conflation (first observed on GLM-4.7-Flash, kept
+            # defensive): `source` is row provenance (extracted vs user_added);
+            # synthesized text belongs in explanation_source. Coerce this one
+            # value; still reject user_added/garbage.
             c["source"] = "extracted"
             log.info("extract: source generated -> extracted (%s)", cid)
         elif c.get("source") != "extracted":
@@ -325,28 +332,35 @@ def _strip_code_fences(text: str) -> str:
     return t
 
 
-# GLM max output per chain link (reasoning + JSON answer share the budget;
-# 8192 keeps P1 extract lists from truncating while staying bounded).
-GLM_MAX_TOKENS = 8192
+# Groq free-tier OTPM (output tokens/min) is 1000 for qwen3.8-27b: every
+# request's max_tokens reserves against that budget, so caps stay small and
+# leave room for the next demo click (extract -> verify within a minute).
+GROQ_MAX_TOKENS = 200            # P2: short JSON (feedback + one nudge)
+GROQ_MAX_TOKENS_EXTRACT = 850    # P1: list (per-request cap must stay < 1000)
 
 
-def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
-                 json_mode: bool = True) -> str:
-    """One GLM call via the z.ai OpenAI-compatible endpoint (S2b default).
+def _groq_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
+                   json_mode: bool = True, max_tokens: int | None = None) -> str:
+    """One Groq call via the OpenAI-compatible endpoint (S2c default).
 
     Raw httpx (already a dependency): explicit timeout, no hidden retries.
-    GLM-4.7 thinking is compulsory, so the answer may arrive next to a
-    `reasoning_content` block; only the JSON `content` is graded. Raises on
-    HTTP>=400/empty/network so the chain can advance (bad JSON is caught by
+    Groq's LPU inference answers in well under a second for these prompts;
+    only the JSON `content` is read (any reasoning fields are ignored). Raises
+    on HTTP>=400/empty/network so the chain can advance (bad JSON is caught by
     the caller's json.loads).
 
-    json_mode requests z.ai JSON-object mode (default; P2 object output).
-    P1 passes json_mode=False: object mode nudges the model to wrap a
-    top-level list, which fails the strict extract validator (observed live).
+    json_mode requests JSON-object mode (default; P2 object output).
+    P1 passes json_mode=False: object mode nudged a previous provider to wrap
+    a top-level list, which fails the strict extract validator. Kept off for
+    list-shaped calls.
+
+    max_tokens defaults to GROQ_MAX_TOKENS (P2). P1 passes the extract cap;
+    both stay under the free-tier OTPM (1000/min) because each request's
+    max_tokens reserves against that budget.
     """
     import httpx  # type: ignore
 
-    url = f"{config.get_glm_base_url()}/chat/completions"
+    url = f"{config.get_groq_base_url()}/chat/completions"
     payload = {
         "model": model,
         "messages": [
@@ -354,7 +368,7 @@ def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: i
             {"role": "user", "content": user},
         ],
         "temperature": 0.2,
-        "max_tokens": GLM_MAX_TOKENS,
+        "max_tokens": max_tokens or GROQ_MAX_TOKENS,
     }
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
@@ -376,17 +390,18 @@ def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: i
 
 
 def _llm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
-                  json_mode: bool = True) -> str:
-    """Provider dispatcher for every live chain link (S2b).
+                  json_mode: bool = True, max_tokens: int | None = None) -> str:
+    """Provider dispatcher for every live chain link (S2c).
 
-    glm (default) -> _glm_generate (z.ai, free tier).
+    groq (default) -> _groq_generate (free tier, LPU-fast).
     gemini -> _gemini_generate (archived path, kept selectable).
     Unknown LLM_PROVIDER raises -> chain advances to the labelled stub.
-    json_mode is forwarded to GLM only (Gemini ignores it).
+    json_mode and max_tokens are forwarded to Groq only (Gemini ignores them).
     """
     provider = config.get_llm_provider()
-    if provider == "glm":
-        return _glm_generate(model, system, user, api_key, timeout_s, json_mode=json_mode)
+    if provider == "groq":
+        return _groq_generate(model, system, user, api_key, timeout_s,
+                              json_mode=json_mode, max_tokens=max_tokens)
     if provider == "gemini":
         return _gemini_generate(model, system, user, api_key, timeout_s, json_mode=json_mode)
     raise ValueError(f"unknown LLM_PROVIDER: {provider!r}")
@@ -431,7 +446,7 @@ def extract_concepts_with_status(
     """S1 live chain + labelled fallback (additive, never raises).
 
     Returns {concepts, mode: live|stub, model, fallback_reason}.
-    Chain: LLM_MODELS order (glm default; gemini chain archived) -> stub.
+    Chain: LLM_MODELS order (groq default; gemini chain archived) -> stub.
     On 429/5xx/bad-JSON/validation fail, advance to next link; after all
     fail, seed-grounded stub. Never 502 in demo. Logs fallback_reason
     server-side without keys.
@@ -452,6 +467,7 @@ def extract_concepts_with_status(
             raw = _llm_generate(
                 model, P1_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S,
                 json_mode=False,  # P1 wants a top-level list, not object mode
+                max_tokens=GROQ_MAX_TOKENS_EXTRACT,  # free-tier OTPM pacing (S2c)
             )
             cleaned = _strip_code_fences(raw)
             try:
@@ -463,6 +479,12 @@ def extract_concepts_with_status(
             # Accept bare list or {concepts: [...]} wrapper.
             if isinstance(data, dict) and isinstance(data.get("concepts"), list):
                 data = data["concepts"]
+            if isinstance(data, list) and not data:
+                # Valid-but-empty live result (e.g. placeholder/empty parsed
+                # text): a labelled stub keeps the demo moving; not an error.
+                last_reason = f"{model}: live returned no concepts (empty list)"
+                log.info("extract: %s", last_reason)
+                continue
             try:
                 concepts = validate_extract_shape(data)
             except ValueError as e:
@@ -647,7 +669,7 @@ def evaluate_paraphrase_with_status(
     Grounding (§8): resolves the concept row server-side by owned
     (session_id, concept_id); only the student paraphrase is client text.
     Blue user_added rows never call the LLM (plausibility-only bypass).
-    Chain: provider chain (glm default; gemini archived) -> stub on
+    Chain: provider chain (groq default; gemini archived) -> stub on
     429/5xx/bad-JSON/validation failure.
     A valid live JSON verdict (even passed=false) is returned as live, never
     silently replaced by the lenient stub.

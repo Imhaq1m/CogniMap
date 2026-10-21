@@ -169,7 +169,10 @@ def _convert_llama_cloud_result(result: object, filename: str, tier: str) -> dic
                     pages.append(i)
                     t = getattr(p, "markdown", None) or (p.get("markdown") if isinstance(p, dict) else None) or ""
                     if t:
-                        markdown_parts.append(str(t))
+                        # Page markers ride along the joined markdown: the
+                        # extractor (and diagram page-overlap) can only cite
+                        # pages it can see in the text.
+                        markdown_parts.append(f"<!-- page {i} -->\n{t}")
             elif isinstance(md, str):
                 markdown_parts.append(md)
             elif isinstance(md, dict):

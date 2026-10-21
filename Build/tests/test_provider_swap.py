@@ -1,13 +1,13 @@
-"""S2b provider-swap tests: GLM-4.7-Flash default, Gemini archived.
+"""S2c provider-swap tests: Groq qwen/qwen3.8-27b default, Gemini archived.
 
-Keyless CI stays green: nothing here touches the network — the z.ai transport
+Keyless CI stays green: nothing here touches the network — the Groq transport
 is faked at httpx.Client and chain tests monkeypatch the dispatcher. Covers:
-provider gating/defaults, dispatcher routing, GLM request shape +
-reasoning_content parsing, HTTP/empty failures -> labelled stub, the archived
-Gemini path staying selectable end-to-end, and the two live-P1 fixes
-(json_mode=False for list-shaped output; `source: generated` conflation
-coerced while user_added stays rejected).
-Isolated DB pattern mirrors tests/test_locks.py:14.
+provider gating/defaults, dispatcher routing, Groq request shape + content-only
+parsing, HTTP/empty failures -> labelled stub, the archived Gemini path staying
+selectable end-to-end, and the P1 list-shape fixes carried over (json_mode=False
+for list-shaped output; `source: generated` conflation coerced while user_added
+stays rejected). GLM was removed (not archived) in S2c — no provider path
+routes it. Isolated DB pattern mirrors tests/test_locks.py:14.
 """
 from __future__ import annotations
 
@@ -51,12 +51,11 @@ def main_row(cid="m1"):
     }
 
 
-def glm_env(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "glm")
-    monkeypatch.setenv("GLM_API_KEY", "dummy-key-not-logged")
-    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+def groq_env(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "dummy-key-not-logged")
+    monkeypatch.delenv("GROQ_BASE_URL", raising=False)
     monkeypatch.delenv("LLM_MODELS", raising=False)
-    monkeypatch.delenv("GLM_BASE_URL", raising=False)
 
 
 def live_json():
@@ -78,8 +77,8 @@ class _Resp:
         return self._payload
 
 
-def fake_glm_http(monkeypatch, status=200, payload=None, text="", raise_exc=None):
-    """Fake httpx.Client so _glm_generate runs offline; returns captured calls."""
+def fake_groq_http(monkeypatch, status=200, payload=None, text="", raise_exc=None):
+    """Fake httpx.Client so _groq_generate runs offline; returns captured calls."""
     calls: list[dict] = []
 
     class _Client:
@@ -105,39 +104,37 @@ def fake_glm_http(monkeypatch, status=200, payload=None, text="", raise_exc=None
 
 # ---- config: new default + archived models + key gating ----
 
-def test_provider_default_is_glm_archived_gemini_kept(monkeypatch):
+def test_provider_default_is_groq_archived_gemini_kept(monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("LLM_MODELS", raising=False)
-    assert config.get_llm_provider() == "glm"
-    assert config.get_llm_models() == ["glm-4.7-flash"]
+    assert config.get_llm_provider() == "groq"
+    assert config.get_llm_models() == ["qwen/qwen3.8-27b"]
     # Archived Gemini chain still selectable, not deleted.
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     assert config.get_llm_models() == [
         "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
     ]
     # Explicit LLM_MODELS wins within the provider.
-    monkeypatch.setenv("LLM_PROVIDER", "glm")
-    monkeypatch.setenv("LLM_MODELS", "glm-4.7-flash,glm-4.6-flash")
-    assert config.get_llm_models() == ["glm-4.7-flash", "glm-4.6-flash"]
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("LLM_MODELS", "qwen/qwen3.8-27b,qwen/qwen3-32b")
+    assert config.get_llm_models() == ["qwen/qwen3.8-27b", "qwen/qwen3-32b"]
     # Migration guard: stale cross-provider names fall back to provider
-    # defaults instead of 400-ing every chain link.
+    # defaults instead of 400-ing every chain link (glm removed in S2c).
+    monkeypatch.setenv("LLM_MODELS", "glm-4.7-flash")
+    assert config.get_llm_models() == ["qwen/qwen3.8-27b"]
     monkeypatch.setenv("LLM_MODELS", "gemini-3.8-flash,gemini-3.7-flash")
-    assert config.get_llm_models() == ["glm-4.7-flash"]
+    assert config.get_llm_models() == ["qwen/qwen3.8-27b"]
 
 
 def test_is_llm_live_provider_gating(monkeypatch):
-    for k in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "GLM_API_KEY", "ZAI_API_KEY"):
+    for k in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("LLM_PROVIDER", "glm")
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
     assert config.is_llm_live() is False
     monkeypatch.setenv("GOOGLE_API_KEY", "g")
-    assert config.is_llm_live() is False  # glm provider needs a GLM key
-    monkeypatch.setenv("GLM_API_KEY", "z")
+    assert config.is_llm_live() is False  # groq provider needs the Groq key
+    monkeypatch.setenv("GROQ_API_KEY", "z")
     assert config.is_llm_live() is True
-    # ZAI_API_KEY alias accepted when GLM_API_KEY is absent.
-    monkeypatch.delenv("GLM_API_KEY", raising=False)
-    monkeypatch.setenv("ZAI_API_KEY", "z2")
-    assert config.get_llm_key() == "z2"
     # Archived Gemini provider gates on the Google key only.
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
@@ -150,112 +147,116 @@ def test_is_llm_live_provider_gating(monkeypatch):
     assert config.is_llm_live() is False
 
 
-def test_llm_status_reports_glm_first_link(monkeypatch):
-    glm_env(monkeypatch)
-    assert config.llm_status() == {"llm": "live", "llm_model": "glm-4.7-flash"}
-    monkeypatch.delenv("GLM_API_KEY", raising=False)
+def test_llm_status_reports_groq_first_link(monkeypatch):
+    groq_env(monkeypatch)
+    assert config.llm_status() == {"llm": "live", "llm_model": "qwen/qwen3.8-27b"}
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     assert config.llm_status() == {"llm": "stub", "llm_model": "stub"}
 
 
 # ---- dispatcher routing (both providers + unknown) ----
 
 def test_dispatcher_routes_by_provider(monkeypatch):
-    glm_env(monkeypatch)
+    groq_env(monkeypatch)
     seen: list[str] = []
-    monkeypatch.setattr(llm, "_glm_generate", lambda *a, **k: seen.append("glm") or "{}")
+    monkeypatch.setattr(llm, "_groq_generate", lambda *a, **k: seen.append("groq") or "{}")
     monkeypatch.setattr(llm, "_gemini_generate", lambda *a, **k: seen.append("gemini") or "{}")
     assert llm._llm_generate("m", "s", "u", "k", 5) == "{}"
-    assert seen == ["glm"]
+    assert seen == ["groq"]
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     llm._llm_generate("m", "s", "u", "k", 5)
-    assert seen == ["glm", "gemini"]
+    assert seen == ["groq", "gemini"]
     monkeypatch.setenv("LLM_PROVIDER", "mystery")
     with pytest.raises(ValueError, match="LLM_PROVIDER"):
         llm._llm_generate("m", "s", "u", "k", 5)
 
 
-# ---- GLM transport: request shape, reasoning_content, failures ----
+def test_dispatcher_forwards_json_mode(monkeypatch):
+    groq_env(monkeypatch)
+    seen: list[dict] = []
+    monkeypatch.setattr(llm, "_groq_generate", lambda *a, **k: seen.append(k) or "{}")
+    llm._llm_generate("m", "s", "u", "k", 5, json_mode=False)
+    assert seen == [{"json_mode": False, "max_tokens": None}]
+    llm._llm_generate("m", "s", "u", "k", 5, json_mode=False,
+                      max_tokens=llm.GROQ_MAX_TOKENS_EXTRACT)
+    assert seen[-1] == {"json_mode": False,
+                        "max_tokens": llm.GROQ_MAX_TOKENS_EXTRACT}
 
-def test_glm_generate_request_shape_and_reasoning(monkeypatch):
-    glm_env(monkeypatch)
+
+# ---- Groq transport: request shape, content-only reading, failures ----
+
+def test_groq_generate_request_shape_and_content_only(monkeypatch):
+    groq_env(monkeypatch)
     answer = live_json()
-    calls = fake_glm_http(monkeypatch, payload={
+    calls = fake_groq_http(monkeypatch, payload={
         "choices": [{"message": {
             "content": answer,
-            "reasoning_content": "long compulsory thinking (must be ignored)",
+            "reasoning": "any reasoning field (must be ignored)",
         }}]
     })
-    out = llm._glm_generate("glm-4.7-flash", "SYS", "USER", "secret-key", 7)
-    assert out == answer  # JSON content only, never the reasoning block
+    out = llm._groq_generate("qwen/qwen3.8-27b", "SYS", "USER", "secret-key", 7)
+    assert out == answer  # JSON content only, never any reasoning block
     assert len(calls) == 1
     c = calls[0]
-    assert c["url"] == "https://api.z.ai/api/paas/v4/chat/completions"
+    assert c["url"] == "https://api.groq.com/openai/v1/chat/completions"
     assert c["headers"]["Authorization"] == "Bearer secret-key"
     assert c["timeout"] == 7.0
     body = c["json"]
-    assert body["model"] == "glm-4.7-flash"
+    assert body["model"] == "qwen/qwen3.8-27b"
     assert body["response_format"] == {"type": "json_object"}
     assert body["temperature"] == 0.2
-    assert body["max_tokens"] == llm.GLM_MAX_TOKENS
+    assert body["max_tokens"] == llm.GROQ_MAX_TOKENS
     assert body["messages"][0] == {"role": "system", "content": "SYS"}
     assert body["messages"][1] == {"role": "user", "content": "USER"}
 
 
-def test_glm_base_url_override(monkeypatch):
-    glm_env(monkeypatch)
-    monkeypatch.setenv("GLM_BASE_URL", "https://example.test/v4/")  # trailing slash
-    calls = fake_glm_http(monkeypatch, payload={
+def test_groq_base_url_override(monkeypatch):
+    groq_env(monkeypatch)
+    monkeypatch.setenv("GROQ_BASE_URL", "https://example.test/v1/")  # trailing slash
+    calls = fake_groq_http(monkeypatch, payload={
         "choices": [{"message": {"content": "{}"}}]
     })
-    llm._glm_generate("glm-4.7-flash", "S", "U", "k", 5)
-    assert calls[0]["url"] == "https://example.test/v4/chat/completions"
+    llm._groq_generate("qwen/qwen3.8-27b", "S", "U", "k", 5)
+    assert calls[0]["url"] == "https://example.test/v1/chat/completions"
 
 
-def test_glm_json_mode_flag_controls_response_format(monkeypatch):
-    glm_env(monkeypatch)
-    calls = fake_glm_http(monkeypatch, payload={
+def test_groq_json_mode_flag_controls_response_format(monkeypatch):
+    groq_env(monkeypatch)
+    calls = fake_groq_http(monkeypatch, payload={
         "choices": [{"message": {"content": "{}"}}]
     })
-    llm._glm_generate("glm-4.7-flash", "S", "U", "k", 5, json_mode=False)
+    llm._groq_generate("qwen/qwen3.8-27b", "S", "U", "k", 5, json_mode=False)
     assert "response_format" not in calls[0]["json"]  # list-shaped calls opt out
-    calls2 = fake_glm_http(monkeypatch, payload={
+    calls2 = fake_groq_http(monkeypatch, payload={
         "choices": [{"message": {"content": "{}"}}]
     })
-    llm._glm_generate("glm-4.7-flash", "S", "U", "k", 5)  # default stays object
+    llm._groq_generate("qwen/qwen3.8-27b", "S", "U", "k", 5)  # default stays object
     assert calls2[0]["json"]["response_format"] == {"type": "json_object"}
 
 
-def test_dispatcher_forwards_json_mode(monkeypatch):
-    glm_env(monkeypatch)
-    seen: list[dict] = []
-    monkeypatch.setattr(llm, "_glm_generate", lambda *a, **k: seen.append(k) or "{}")
-    llm._llm_generate("m", "s", "u", "k", 5, json_mode=False)
-    assert seen == [{"json_mode": False}]
-
-
-def test_glm_generate_failures_raise(monkeypatch):
-    glm_env(monkeypatch)
-    fake_glm_http(monkeypatch, status=429, payload={"error": "quota"},
-                  text="rate limited")
+def test_groq_generate_failures_raise(monkeypatch):
+    groq_env(monkeypatch)
+    fake_groq_http(monkeypatch, status=429, payload={"error": "quota"},
+                   text="rate limited")
     with pytest.raises(RuntimeError, match="429"):
-        llm._glm_generate("glm-4.7-flash", "S", "U", "k", 5)
-    fake_glm_http(monkeypatch, payload={"choices": [{"message": {"content": ""}}]})
+        llm._groq_generate("qwen/qwen3.8-27b", "S", "U", "k", 5)
+    fake_groq_http(monkeypatch, payload={"choices": [{"message": {"content": ""}}]})
     with pytest.raises(ValueError, match="empty"):
-        llm._glm_generate("glm-4.7-flash", "S", "U", "k", 5)
-    fake_glm_http(monkeypatch, raise_exc=httpx.ConnectError("down"))
+        llm._groq_generate("qwen/qwen3.8-27b", "S", "U", "k", 5)
+    fake_groq_http(monkeypatch, raise_exc=httpx.ConnectError("down"))
     with pytest.raises(httpx.ConnectError):
-        llm._glm_generate("glm-4.7-flash", "S", "U", "k", 5)
+        llm._groq_generate("qwen/qwen3.8-27b", "S", "U", "k", 5)
 
 
-# ---- end-to-end: GLM 503 -> labelled stub; archived Gemini path live ----
+# ---- end-to-end: Groq 503 -> labelled stub; archived Gemini path live ----
 
-def test_glm_http_503_falls_back_to_labelled_stub(monkeypatch):
+def test_groq_http_503_falls_back_to_labelled_stub(monkeypatch):
     u = mk_user()
     s = mk_session(u["id"])
     store.confirm_selection(s["id"], u["id"], [main_row("m1")])
-    glm_env(monkeypatch)
-    fake_glm_http(monkeypatch, status=503, payload={"error": "busy"},
-                  text="unavailable")
+    groq_env(monkeypatch)
+    fake_groq_http(monkeypatch, status=503, payload={"error": "busy"},
+                   text="unavailable")
     st = llm.evaluate_paraphrase_with_status(
         s["id"], "m1", "my own words", user_id=u["id"]
     )
@@ -267,19 +268,38 @@ def test_glm_http_503_falls_back_to_labelled_stub(monkeypatch):
 # ---- P1 (list-shaped): no object mode; known source conflation coerced ----
 
 def test_p1_chain_list_mode_and_source_coercion(monkeypatch):
-    glm_env(monkeypatch)
+    groq_env(monkeypatch)
     row = main_row("m1")
-    row["source"] = "generated"  # live GLM conflation -> coerced, never user_added
-    calls = fake_glm_http(monkeypatch, payload={
+    row["source"] = "generated"  # model conflation -> coerced, never user_added
+    calls = fake_groq_http(monkeypatch, payload={
         "choices": [{"message": {
             "content": "```json\n" + json.dumps([row]) + "\n```",
         }}]
     })
     st = llm.extract_concepts_with_status("Some parsed markdown about ML.")
-    assert st["mode"] == "live" and st["model"] == "glm-4.7-flash"
+    assert st["mode"] == "live" and st["model"] == "qwen/qwen3.8-27b"
     assert st["fallback_reason"] == ""
     assert "response_format" not in calls[0]["json"]  # P1 must not force object mode
+    assert calls[0]["json"]["max_tokens"] == llm.GROQ_MAX_TOKENS_EXTRACT
     assert st["concepts"][0]["source"] == "extracted"  # coerced by the validator
+
+
+def test_groq_caps_stay_under_free_tier_otpm():
+    # qwen3.8-27b free tier: OTPM 1000/min; each request's max_tokens reserves
+    # against that budget, so both caps must fit well under 1000.
+    assert 0 < llm.GROQ_MAX_TOKENS <= llm.GROQ_MAX_TOKENS_EXTRACT < 1000
+
+
+def test_p1_empty_list_reason_is_clean(monkeypatch):
+    """Placeholder/empty parsed text: live [] is a labelled stub, not an error."""
+    groq_env(monkeypatch)
+    fake_groq_http(monkeypatch, payload={
+        "choices": [{"message": {"content": "[]"}}]
+    })
+    st = llm.extract_concepts_with_status("")
+    assert st["mode"] == "stub"
+    assert "no concepts" in st["fallback_reason"]
+    assert "validation failed" not in st["fallback_reason"]
 
 
 def test_validator_coerces_generated_source_only():
@@ -291,6 +311,14 @@ def test_validator_coerces_generated_source_only():
     bad["source"] = "user_added"
     with pytest.raises(ValueError, match="extracted only"):
         llm.validate_extract_shape([bad])
+
+
+def test_glm_provider_removed(monkeypatch):
+    # S2c user decision: GLM removed from the system (not archived).
+    monkeypatch.setenv("LLM_PROVIDER", "glm")
+    monkeypatch.setenv("GLM_API_KEY", "old-glm-key")
+    assert config.get_llm_key() is None
+    assert config.is_llm_live() is False
 
 
 def test_gemini_archived_path_still_selectable(monkeypatch):

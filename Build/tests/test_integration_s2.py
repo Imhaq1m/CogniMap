@@ -58,10 +58,9 @@ def blue_row(cid="b1"):
 
 
 def force_live(monkeypatch):
-    # S2b default provider: GLM-4.7-Flash (z.ai); Gemini stays archived.
-    monkeypatch.setenv("LLM_PROVIDER", "glm")
-    monkeypatch.setenv("GLM_API_KEY", "dummy-key-not-logged")
-    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    # S2c default provider: Groq qwen/qwen3.8-27b; Gemini stays archived.
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "dummy-key-not-logged")
     monkeypatch.delenv("LLM_MODELS", raising=False)  # provider default chain
 
 
@@ -94,7 +93,9 @@ def live_verifies(sid, uid, concept_ids, paraphrase="my own words"):
 
 def test_p2_prompt_rubric_and_hint_policy():
     assert "lenient tutor" in llm.P2_SYSTEM
-    assert "minor omissions" in llm.P2_SYSTEM
+    assert "missing supporting details" in llm.P2_SYSTEM
+    assert "captures the central idea" in llm.P2_SYSTEM
+    assert "reserve Partly accurate" in llm.P2_RULES
     assert "accuracy == 'Accurate'" in llm.P2_SYSTEM
     assert "originality == 'Own words'" in llm.P2_SYSTEM
     assert "NEVER states or paraphrases the reference answer" in llm.P2_SYSTEM
@@ -132,7 +133,7 @@ def test_grounded_prompt_uses_resolved_fields(monkeypatch):
     st = llm.evaluate_paraphrase_with_status(
         sid, "m1", "MY-STUDENT-WORDS", user_id=u["id"]
     )
-    assert st["mode"] == "live" and st["model"] == "glm-4.7-flash"
+    assert st["mode"] == "live" and st["model"] == "qwen/qwen3.8-27b"
     assert st["evaluation"]["passed"] is True
     assert seen["system"] == llm.P2_SYSTEM
     assert "STORED-EXPLANATION" in seen["user"]
@@ -341,7 +342,7 @@ def test_l12_js_shows_stub_warning_additively():
 
 def test_seed_100_keyless_triggers_l3(monkeypatch):
     for k in ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
-              "GLM_API_KEY", "ZAI_API_KEY"):
+              "GROQ_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     u = mk_user("seedU")
     s = mk_session(u["id"])
@@ -402,7 +403,7 @@ def test_live_style_seed_100_mocked_triggers_l3(monkeypatch):
         if c.get("source") == "user_added":
             assert v["mode"] == "bypass"
         else:
-            assert v["mode"] == "live" and v["model"] == "glm-4.7-flash"
+            assert v["mode"] == "live" and v["model"] == "qwen/qwen3.8-27b"
     last = out[-1]
     assert last["l3_ready"] is True
     assert last["progress"]["pct"] == 100
