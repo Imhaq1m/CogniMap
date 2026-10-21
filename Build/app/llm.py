@@ -18,9 +18,10 @@ scope all reads to that session (multi-session isolation, doc-scope
 grounding). Real model implementations MUST repeat the ownership check
 first (see Steps_Locks §8).
 
-S1 live (additive): extract_concepts tries Gemini chain
-  gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash -> stub
-behind env flags (LLM_PROVIDER=gemini + GOOGLE_API_KEY). Keyless stays stub.
+S1 live (additive): extract_concepts tries the configured provider chain behind
+env flags (S2b default: glm-4.7-flash -> stub; archived: LLM_PROVIDER=gemini
+runs gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash). Keyless stays
+stub.
 List return shape frozen; mode/model/fallback_reason travel out-of-band via
 extract_concepts_with_status (routes use it for labelling, never 502).
 S2 live (additive): evaluate_paraphrase uses the same chain with a balanced
@@ -316,8 +317,69 @@ def _strip_code_fences(text: str) -> str:
     return t
 
 
+# GLM max output per chain link (reasoning + JSON answer share the budget;
+# 8192 keeps P1 extract lists from truncating while staying bounded).
+GLM_MAX_TOKENS = 8192
+
+
+def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int) -> str:
+    """One GLM call via the z.ai OpenAI-compatible endpoint (S2b default).
+
+    Raw httpx (already a dependency): explicit timeout, no hidden retries.
+    GLM-4.7 thinking is compulsory, so the answer may arrive next to a
+    `reasoning_content` block; only the JSON `content` is graded. Raises on
+    HTTP>=400/empty/network so the chain can advance (bad JSON is caught by
+    the caller's json.loads).
+    """
+    import httpx  # type: ignore
+
+    url = f"{config.get_glm_base_url()}/chat/completions"
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
+        "max_tokens": GLM_MAX_TOKENS,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    with httpx.Client(timeout=float(timeout_s)) as client:
+        resp = client.post(url, json=payload, headers=headers)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"{model}: HTTP {resp.status_code} {resp.text[:120]}")
+    data = resp.json()
+    choices = data.get("choices") if isinstance(data, dict) else None
+    message = (choices[0].get("message") if choices else None) or {}
+    text = message.get("content") or ""
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError(f"{model} returned empty response")
+    return text
+
+
+def _llm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int) -> str:
+    """Provider dispatcher for every live chain link (S2b).
+
+    glm (default) -> _glm_generate (z.ai, free tier).
+    gemini -> _gemini_generate (archived path, kept selectable).
+    Unknown LLM_PROVIDER raises -> chain advances to the labelled stub.
+    """
+    provider = config.get_llm_provider()
+    if provider == "glm":
+        return _glm_generate(model, system, user, api_key, timeout_s)
+    if provider == "gemini":
+        return _gemini_generate(model, system, user, api_key, timeout_s)
+    raise ValueError(f"unknown LLM_PROVIDER: {provider!r}")
+
+
 def _gemini_generate(model: str, system: str, user: str, api_key: str, timeout_s: int) -> str:
-    """One Gemini call. Raises on 429/5xx/network so the chain can advance."""
+    """One Gemini call (ARCHIVED: retired as default Oct 2026 over Gemini
+    429/503 availability; selectable via LLM_PROVIDER=gemini). Raises on
+    429/5xx/network so the chain can advance."""
     from google import genai  # type: ignore
     from google.genai import types  # type: ignore
 
@@ -350,7 +412,7 @@ def extract_concepts_with_status(
     """S1 live chain + labelled fallback (additive, never raises).
 
     Returns {concepts, mode: live|stub, model, fallback_reason}.
-    Chain: LLM_MODELS order (default 3.8 -> 3.7 -> 3.6) -> stub.
+    Chain: LLM_MODELS order (glm default; gemini chain archived) -> stub.
     On 429/5xx/bad-JSON/validation fail, advance to next link; after all
     fail, seed-grounded stub. Never 502 in demo. Logs fallback_reason
     server-side without keys.
@@ -361,14 +423,14 @@ def extract_concepts_with_status(
         reason = "stub-default (no LLM key)"
         log.info("extract: mode=stub reason=%s", reason)
         return {"concepts": concepts, "mode": "stub", "model": "stub", "fallback_reason": reason}
-    api_key = config.get_google_key() or ""
+    api_key = config.get_llm_key() or ""
     models = config.get_llm_models()
     user_prompt = build_p1_user(markdown, figs)
     last_reason = ""
     for model in models:
         try:
             log.info("extract: trying live model=%s", model)
-            raw = _gemini_generate(model, P1_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S)
+            raw = _llm_generate(model, P1_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S)
             cleaned = _strip_code_fences(raw)
             try:
                 data = json.loads(cleaned)
@@ -415,7 +477,7 @@ def llm_status() -> dict:
 
 
 # 2. evaluate_paraphrase(session_id, concept_id, paraphrase) -> {passed,...}
-# S2 live: balanced rubric (accuracy + originality), Gemini chain -> stub.
+# S2 live: balanced rubric (accuracy + originality), provider chain -> stub.
 # The frozen §8 function returns the result only; mode/model/fallback_reason
 # travel out-of-band via evaluate_paraphrase_with_status (route labelling).
 
@@ -563,7 +625,8 @@ def evaluate_paraphrase_with_status(
     Grounding (§8): resolves the concept row server-side by owned
     (session_id, concept_id); only the student paraphrase is client text.
     Blue user_added rows never call the LLM (plausibility-only bypass).
-    Chain: LLM_MODELS order -> stub on 429/5xx/bad-JSON/validation failure.
+    Chain: provider chain (glm default; gemini archived) -> stub on
+    429/5xx/bad-JSON/validation failure.
     A valid live JSON verdict (even passed=false) is returned as live, never
     silently replaced by the lenient stub.
     """
@@ -597,14 +660,14 @@ def evaluate_paraphrase_with_status(
         return {"evaluation": evaluation, "mode": "stub",
                 "model": "stub", "fallback_reason": reason}
 
-    api_key = config.get_google_key() or ""
+    api_key = config.get_llm_key() or ""
     models = config.get_llm_models()
     user_prompt = build_p2_user(c, text)
     last_reason = ""
     for model in models:
         try:
             log.info("paraphrase: trying live model=%s concept=%s", model, concept_id)
-            raw = _gemini_generate(
+            raw = _llm_generate(
                 model, P2_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S
             )
             data = json.loads(_strip_code_fences(raw))

@@ -15,8 +15,10 @@ Env / config (cross-cutting)
 -----------------------------
 Files: Build/requirements.txt:5 (llamaparse deferred), Build/app/parse.py, Build/app/llm.py, gitignored .env
 Decision: Gemini Developer API, chain gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash -> stub (verified endpoints Oct 2026; 3.8 most intelligent Flash, 3.7/3.6 prior stable).
+Amendment (S2b, Oct 2026): default provider switched Gemini -> GLM-4.7-Flash (z.ai, free tier) after Gemini 429/503 availability pain (prompts billed even when high traffic returns no output). Gemini chain archived, not deleted — still selectable via LLM_PROVIDER=gemini. GLM runs on raw httpx: no new dependency.
 - [x] Add deps: llama-parse client, google-genai (NOT legacy google-generativeai), python-dotenv
 - [x] Env names locked: LLAMA_CLOUD_API_KEY, LLM_PROVIDER=gemini, GOOGLE_API_KEY (accept GEMINI_API_KEY alias), LLM_MODELS=gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash, LLAMA_TIER (agentic|agentic_plus)
+- [x] Env amendment (S2b): LLM_PROVIDER=glm (new default), GLM_API_KEY (ZAI_API_KEY alias), LLM_MODELS=glm-4.7-flash (default per provider), GLM_BASE_URL (default https://api.z.ai/api/paas/v4). Gemini names above stay valid (LLM_PROVIDER=gemini = archived path). Same stub/labelling guarantees for both providers.
 - [x] .env gitignored, os.environ only, CI green with no keys (live tests skip)
 - [x] GET /api/health reports {step, llama: live|stub, llm: live|stub, llm_model: which chain link served} (additive fields only)
 - [x] Document key setup for supervisor machine (which .env, no keys in repo)
@@ -44,6 +46,16 @@ Decisions (S2 grill): balanced rubric — pass requires Accurate + Own words; mi
 - [x] Fallback: same try-live -> stub-lenient + labelled pattern as S1 (Gemini 3.8->3.7->3.6 -> stub on 429/5xx/bad-JSON/shape fail; /l12/verify adds mode/model + stub warning; valid live fail stays live, never silently passes)
 - [x] Trail: payload keeps paraphrase + accuracy/originality/feedback (extracted) vs user_explanation + warning-ack (blue) (pytest seed-100 checks both shapes; blue rows omit accuracy/originality)
 - [x] DONE = seed 100% still triggers L3 modal with or without keys (keyless pytest 6/6 -> l3_ready + stage L3; mocked-live 6/6 with blue skipping the model; real-key run: live c1/c2 passed, c3-c5 labelled stub fallback on 429/503, c6 bypass, still 100% -> L3)
+
+[S2b] DONE — GLM-4.7-Flash provider swap (all live calls, Gemini archived)
+----------------------------------------------------------------------------
+Files: Build/app/config.py (provider gate + GLM env), Build/app/llm.py (_glm_generate + _llm_generate dispatcher; _gemini_generate archived-selectable), Build/tests/test_provider_swap.py (new), Build/tests/test_integration_s1.py + test_integration_s2.py (repointed to the dispatcher), Build/tests/conftest.py (GLM keys stripped keyless)
+Decisions (user, Oct 2026): all live LLM calls move to GLM-4.7-Flash (free, 200K ctx, OpenAI-compatible z.ai endpoint); GLM -> stub fallback; raw httpx; Gemini archived-selectable, never deleted.
+- [x] _glm_generate: httpx POST {GLM_BASE_URL}/chat/completions, Bearer GLM_API_KEY, temperature 0.2, response_format {"type":"json_object"}, max_tokens cap (GLM_MAX_TOKENS), per-link LLM_TIMEOUT_S; reads message.content only (GLM-4.7 thinking is compulsory -> reasoning_content ignored); HTTP>=400/empty/network raises -> chain advances.
+- [x] _llm_generate dispatcher: glm (default) / gemini (archived) / unknown -> raise -> labelled stub; both P1 extract and P2 paraphrase chains call it; key fetched per provider (config.get_llm_key).
+- [x] Labelling contract unchanged: mode=live|stub|bypass + model + fallback_reason; UI needs no change (live now = glm-4.7-flash); health llm_model reports first chain link.
+- [x] Tests: provider gating/defaults, dispatcher routing, GLM request shape + reasoning_content parse, 429/503/empty -> labelled stub, archived Gemini path selectable end-to-end; keyless suite stays green.
+- [ ] DONE = keyless pytest green + real GLM_API_KEY run reaches L3 100% with mode=live (needs GLM_API_KEY + LLM_PROVIDER=glm in repo-root .env; Gemini live run already proven at S1/S2).
 
 [S3] NEXT — L3 generate_scenario + evaluate_scenario (future grill)
 -------------------------------------------------------------------
@@ -98,6 +110,7 @@ All server-side: resolve text by owned ids first, never trust client text, then 
 - [ ] P4 evaluate_scenario: system "grade per-selection vs scenario facts + reference; tier 1 wrong-concept not-related, tier 2 right-concept wrong-justification hint, tier 3 pass." Per-selection inject SCENARIO + CONCEPT title/text/pages + JUSTIFICATION + BLUE flag (user text as ground, prefix "user-defined — plausibility check, not doc-cited"). Return {concept_id,passed,feedback,hint}. App computes missed_ids + cleared (missed empty AND all passed).
 - [ ] P5 probe_link: system "probing analyst, grade Why/Fail independently, side-targeted hints." Inject EDGE A -type-> B + A_REF + B_REF + BLUE flag + WHY_ANSWER + FAIL_ANSWER -> {why_passed,why_feedback,why_hint,fail_passed,fail_feedback,fail_hint}. Same prompts for custom edges. App brightens only when both true.
 - [x] Provider syntax (Gemini): google-genai SDK, response_mime_type="application/json", low temperature (0.2-0.3) for extract/eval determinism, system_instruction carries the system lines above. Same prompt text for 3.8/3.7/3.6 — no per-model prompt fork. No function-calling dependency.
+- [x] Provider syntax (GLM, default since S2b): raw httpx POST https://api.z.ai/api/paas/v4/chat/completions, Bearer GLM_API_KEY, temperature 0.2, response_format {"type":"json_object"}, max_tokens cap. GLM-4.7 thinking is compulsory: reasoning may arrive in reasoning_content next to the JSON answer in content (parser reads content only). Same prompt text for both providers — no per-provider prompt fork. Gemini syntax line above stays valid when LLM_PROVIDER=gemini (archived).
 - [x] Caching (locked): implicit-only, stable-prefix-first. All three chain models support implicit (default on, min 4096 tokens, savings auto via usage.total_cached_tokens) + explicit, but explicit deferred (extra lifecycle; caches don't share across 3.8/3.7/3.6 fallback). Keep stable content first + variable answers last in P1-P5 to maximise hit chance; extract (full markdown) is the only call likely to hit.
 
 Open questions for next grilling

@@ -20,7 +20,8 @@ os.environ.setdefault("COGNIMAP_DB", _DB)
 
 import pytest
 
-_LIVE_KEYS = ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY")
+_LIVE_KEYS = ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
+              "GLM_API_KEY", "ZAI_API_KEY")
 _SAVED: dict[str, str | None] = {}
 
 

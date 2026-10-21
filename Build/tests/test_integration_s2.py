@@ -58,9 +58,11 @@ def blue_row(cid="b1"):
 
 
 def force_live(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "gemini")
-    monkeypatch.setenv("GOOGLE_API_KEY", "dummy-key-not-logged")
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # S2b default provider: GLM-4.7-Flash (z.ai); Gemini stays archived.
+    monkeypatch.setenv("LLM_PROVIDER", "glm")
+    monkeypatch.setenv("GLM_API_KEY", "dummy-key-not-logged")
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODELS", raising=False)  # provider default chain
 
 
 def live_json(accuracy="Accurate", originality="Own words",
@@ -126,11 +128,11 @@ def test_grounded_prompt_uses_resolved_fields(monkeypatch):
                     api_key=api_key, timeout_s=timeout_s)
         return live_json()
 
-    monkeypatch.setattr(llm, "_gemini_generate", fake)
+    monkeypatch.setattr(llm, "_llm_generate", fake)
     st = llm.evaluate_paraphrase_with_status(
         sid, "m1", "MY-STUDENT-WORDS", user_id=u["id"]
     )
-    assert st["mode"] == "live" and st["model"] == "gemini-3.8-flash"
+    assert st["mode"] == "live" and st["model"] == "glm-4.7-flash"
     assert st["evaluation"]["passed"] is True
     assert seen["system"] == llm.P2_SYSTEM
     assert "STORED-EXPLANATION" in seen["user"]
@@ -174,7 +176,7 @@ def test_live_balanced_pass_gate(monkeypatch, accuracy, originality, expected):
     force_live(monkeypatch)
     # Model claims passed=True; the app derives the gate from the bands.
     monkeypatch.setattr(
-        llm, "_gemini_generate",
+        llm, "_llm_generate",
         lambda *a, **k: live_json(accuracy=accuracy, originality=originality,
                                   hint="focus on the key idea"),
     )
@@ -238,7 +240,7 @@ def test_fallback_bad_key_goes_stub(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("401 bad key")
 
-    monkeypatch.setattr(llm, "_gemini_generate", boom)
+    monkeypatch.setattr(llm, "_llm_generate", boom)
     st = llm.evaluate_paraphrase_with_status(
         sid, "m1", "my own words", user_id=u["id"]
     )
@@ -258,7 +260,7 @@ def test_fallback_bad_json_goes_stub(monkeypatch):
     sid = s["id"]
     store.confirm_selection(sid, u["id"], [main_row("m1")])
     force_live(monkeypatch)
-    monkeypatch.setattr(llm, "_gemini_generate", lambda *a, **k: "not-json {{{")
+    monkeypatch.setattr(llm, "_llm_generate", lambda *a, **k: "not-json {{{")
     st = llm.evaluate_paraphrase_with_status(
         sid, "m1", "my own words", user_id=u["id"]
     )
@@ -274,7 +276,7 @@ def test_live_fail_is_not_replaced_by_stub(monkeypatch):
     store.confirm_selection(sid, u["id"], [main_row("m1")])
     force_live(monkeypatch)
     monkeypatch.setattr(
-        llm, "_gemini_generate",
+        llm, "_llm_generate",
         lambda *a, **k: live_json(
             accuracy="Partly accurate", originality="Own words",
             feedback="Close, but one key idea is missing.",
@@ -307,7 +309,7 @@ def test_blue_bypass_never_calls_llm(monkeypatch):
         calls.append(1)
         return live_json()
 
-    monkeypatch.setattr(llm, "_gemini_generate", fake)
+    monkeypatch.setattr(llm, "_llm_generate", fake)
     st = llm.evaluate_paraphrase_with_status(
         sid, "b1", "my self-defined meaning", user_id=u["id"]
     )
@@ -338,7 +340,8 @@ def test_l12_js_shows_stub_warning_additively():
 
 
 def test_seed_100_keyless_triggers_l3(monkeypatch):
-    for k in ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+    for k in ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
+              "GLM_API_KEY", "ZAI_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     u = mk_user("seedU")
     s = mk_session(u["id"])
@@ -391,7 +394,7 @@ def test_live_style_seed_100_mocked_triggers_l3(monkeypatch):
         calls.append(model)
         return live_json()
 
-    monkeypatch.setattr(llm, "_gemini_generate", fake)
+    monkeypatch.setattr(llm, "_llm_generate", fake)
     out = live_verifies(sid, u["id"], [c["concept_id"] for c in mains])
     extracted = [c for c in mains if c.get("source") != "user_added"]
     assert len(calls) == len(extracted)  # blue c6 never reaches the model
@@ -399,7 +402,7 @@ def test_live_style_seed_100_mocked_triggers_l3(monkeypatch):
         if c.get("source") == "user_added":
             assert v["mode"] == "bypass"
         else:
-            assert v["mode"] == "live" and v["model"] == "gemini-3.8-flash"
+            assert v["mode"] == "live" and v["model"] == "glm-4.7-flash"
     last = out[-1]
     assert last["l3_ready"] is True
     assert last["progress"]["pct"] == 100

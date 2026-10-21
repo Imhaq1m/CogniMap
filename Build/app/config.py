@@ -3,11 +3,17 @@
 Centralises all env handling for LLM / LlamaParse live paths.
 Keyless runs stay stub; live APIs behind env flags; supervisor demo never breaks.
 
-Env names locked (Integration_Tracker):
+S2b (Oct 2026): live default switched Gemini -> GLM-4.7-Flash (z.ai free
+tier) after Gemini 429/503 availability pain; the Gemini chain is archived,
+not deleted — still selectable via LLM_PROVIDER=gemini.
+
+Env names locked (Integration_Tracker; GLM amendment S2b):
   LLAMA_CLOUD_API_KEY
-  LLM_PROVIDER=gemini
-  GOOGLE_API_KEY (accept GEMINI_API_KEY alias, GOOGLE_API_KEY wins)
-  LLM_MODELS=gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash
+  LLM_PROVIDER=glm (default; gemini = archived path, kept selectable)
+  GLM_API_KEY (accept ZAI_API_KEY alias, GLM_API_KEY wins)
+  GLM_BASE_URL (default https://api.z.ai/api/paas/v4)
+  LLM_MODELS=glm-4.7-flash (default per provider; Gemini triplet archived)
+  GOOGLE_API_KEY / GEMINI_API_KEY (archived Gemini path only)
   LLAMA_TIER (agentic|agentic_plus, default agentic)
 
 Limits (S6, decided here so parse + routes share them):
@@ -31,7 +37,10 @@ except Exception:
     # os.environ still works without it so keyless CI stays green.
     pass
 
-DEFAULT_LLM_MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+DEFAULT_GLM_MODELS = ["glm-4.7-flash"]
+# Archived as default Oct 2026 (S2b); selectable via LLM_PROVIDER=gemini.
+DEFAULT_GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+DEFAULT_LLM_MODELS = DEFAULT_GLM_MODELS  # backwards-compatible alias
 
 MAX_PDF_BYTES = int(os.environ.get("MAX_PDF_BYTES", str(20 * 1024 * 1024)))
 LLAMA_PAGE_CAP = int(os.environ.get("LLAMA_PAGE_CAP", "50"))
@@ -53,16 +62,39 @@ def get_google_key() -> str | None:
     return gem or None
 
 
+def get_glm_key() -> str | None:
+    # GLM_API_KEY wins; ZAI_API_KEY accepted alias (z.ai console naming).
+    g = (os.environ.get("GLM_API_KEY") or "").strip()
+    if g:
+        return g
+    z = (os.environ.get("ZAI_API_KEY") or "").strip()
+    return z or None
+
+
+def get_glm_base_url() -> str:
+    raw = (os.environ.get("GLM_BASE_URL") or "").strip()
+    return (raw or "https://api.z.ai/api/paas/v4").rstrip("/")
+
+
 def get_llm_provider() -> str:
-    return (os.environ.get("LLM_PROVIDER") or "gemini").strip().lower() or "gemini"
+    # S2b default: glm. "gemini" routes to the archived provider path.
+    return (os.environ.get("LLM_PROVIDER") or "glm").strip().lower() or "glm"
 
 
 def get_llm_models() -> list[str]:
+    provider = get_llm_provider()
+    default = DEFAULT_GEMINI_MODELS if provider == "gemini" else DEFAULT_GLM_MODELS
     raw = (os.environ.get("LLM_MODELS") or "").strip()
-    if not raw:
-        return list(DEFAULT_LLM_MODELS)
-    out = [m.strip() for m in raw.split(",") if m.strip()]
-    return out or list(DEFAULT_LLM_MODELS)
+    if raw:
+        out = [m.strip() for m in raw.split(",") if m.strip()]
+        # Migration guard: stale cross-provider names in LLM_MODELS (e.g.
+        # Gemini ids left in .env after the S2b swap) would 400 every chain
+        # link; drop them and use this provider's defaults instead.
+        other = "gemini" if provider == "glm" else "glm"
+        out = [m for m in out if not m.startswith(other)]
+        if out:
+            return out
+    return list(default)
 
 
 def get_llama_tier() -> str:
@@ -76,8 +108,18 @@ def is_llama_live() -> bool:
     return bool(get_llama_key())
 
 
+def get_llm_key() -> str | None:
+    """Provider-appropriate live key (None when not configured)."""
+    provider = get_llm_provider()
+    if provider == "glm":
+        return get_glm_key()
+    if provider == "gemini":
+        return get_google_key()
+    return None
+
+
 def is_llm_live() -> bool:
-    return get_llm_provider() == "gemini" and bool(get_google_key())
+    return bool(get_llm_key())
 
 
 def llm_status() -> dict:

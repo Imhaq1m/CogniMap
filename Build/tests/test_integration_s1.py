@@ -24,6 +24,10 @@ from app.main import app
 
 client = TestClient(app)
 
+# Every LLM key the code understands — forced absent to prove stub paths.
+_KEYLESS_ENV = ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
+                "GLM_API_KEY", "ZAI_API_KEY")
+
 
 def mk_user(prefix="s1"):
     return store.get_or_create_user(f"{prefix}-{uuid.uuid4().hex[:6]}")
@@ -48,7 +52,7 @@ def test_health_additive_fields():
 def test_parse_status_stub_keyless(monkeypatch):
     # Without keys (CI), both report stub. Forced keyless here so the test
     # is hermetic even on machines with keys in .env (conftest also strips).
-    for k in ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+    for k in _KEYLESS_ENV:
         monkeypatch.delenv(k, raising=False)
     assert parse.parse_status() == {"llama": "stub"}
     assert llm.llm_status() == {"llm": "stub", "llm_model": "stub"}
@@ -81,7 +85,7 @@ def test_extract_list_shape_frozen():
 
 
 def test_extract_with_status_stub_labels(monkeypatch):
-    for k in ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+    for k in _KEYLESS_ENV:
         monkeypatch.delenv(k, raising=False)
     parsed = parse.parse_pdf("demo.pdf")
     st = llm.extract_concepts_with_status(parsed["markdown"], parsed["figures"])
@@ -94,11 +98,13 @@ def test_extract_with_status_stub_labels(monkeypatch):
 # ---- fallback: bad key / bad JSON -> stub + mode=stub (never 502) ----
 
 def test_fallback_bad_key_goes_stub(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "gemini")
-    monkeypatch.setenv("GOOGLE_API_KEY", "bad-key-for-test")
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # S2b: default provider is GLM; chain fails -> labelled stub, never 502.
+    monkeypatch.setenv("LLM_PROVIDER", "glm")
+    monkeypatch.setenv("GLM_API_KEY", "bad-key-for-test")
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODELS", raising=False)
     # Force the chain to fail fast without network.
-    monkeypatch.setattr(llm, "_gemini_generate", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("401 bad key")))
+    monkeypatch.setattr(llm, "_llm_generate", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("401 bad key")))
     parsed = parse.parse_pdf("demo.pdf")
     st = llm.extract_concepts_with_status(parsed["markdown"], parsed["figures"])
     assert st["mode"] == "stub" and st["model"] == "stub"
@@ -107,10 +113,11 @@ def test_fallback_bad_key_goes_stub(monkeypatch):
 
 
 def test_fallback_bad_json_goes_stub(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "gemini")
-    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setattr(llm, "_gemini_generate", lambda *a, **k: "not-json {{{")
+    monkeypatch.setenv("LLM_PROVIDER", "glm")
+    monkeypatch.setenv("GLM_API_KEY", "dummy")
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_MODELS", raising=False)
+    monkeypatch.setattr(llm, "_llm_generate", lambda *a, **k: "not-json {{{")
     parsed = parse.parse_pdf("demo.pdf")
     st = llm.extract_concepts_with_status(parsed["markdown"], parsed["figures"])
     assert st["mode"] == "stub"
@@ -171,7 +178,7 @@ def test_live_parse_pdf_bytes():
 # ---- routes: /extract labelling + /upload-pdf + cleanup ----
 
 def test_extract_route_labels_stub(monkeypatch):
-    for k in ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+    for k in _KEYLESS_ENV:
         monkeypatch.delenv(k, raising=False)
     u = mk_user("exU")
     s = mk_session(u["id"], "lecture.pdf")
