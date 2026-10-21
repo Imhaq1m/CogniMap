@@ -3,8 +3,10 @@
 Keyless CI stays green: nothing here touches the network — the z.ai transport
 is faked at httpx.Client and chain tests monkeypatch the dispatcher. Covers:
 provider gating/defaults, dispatcher routing, GLM request shape +
-reasoning_content parsing, HTTP/empty failures -> labelled stub, and the
-archived Gemini path staying selectable end-to-end.
+reasoning_content parsing, HTTP/empty failures -> labelled stub, the archived
+Gemini path staying selectable end-to-end, and the two live-P1 fixes
+(json_mode=False for list-shaped output; `source: generated` conflation
+coerced while user_added stays rejected).
 Isolated DB pattern mirrors tests/test_locks.py:14.
 """
 from __future__ import annotations
@@ -209,6 +211,28 @@ def test_glm_base_url_override(monkeypatch):
     assert calls[0]["url"] == "https://example.test/v4/chat/completions"
 
 
+def test_glm_json_mode_flag_controls_response_format(monkeypatch):
+    glm_env(monkeypatch)
+    calls = fake_glm_http(monkeypatch, payload={
+        "choices": [{"message": {"content": "{}"}}]
+    })
+    llm._glm_generate("glm-4.7-flash", "S", "U", "k", 5, json_mode=False)
+    assert "response_format" not in calls[0]["json"]  # list-shaped calls opt out
+    calls2 = fake_glm_http(monkeypatch, payload={
+        "choices": [{"message": {"content": "{}"}}]
+    })
+    llm._glm_generate("glm-4.7-flash", "S", "U", "k", 5)  # default stays object
+    assert calls2[0]["json"]["response_format"] == {"type": "json_object"}
+
+
+def test_dispatcher_forwards_json_mode(monkeypatch):
+    glm_env(monkeypatch)
+    seen: list[dict] = []
+    monkeypatch.setattr(llm, "_glm_generate", lambda *a, **k: seen.append(k) or "{}")
+    llm._llm_generate("m", "s", "u", "k", 5, json_mode=False)
+    assert seen == [{"json_mode": False}]
+
+
 def test_glm_generate_failures_raise(monkeypatch):
     glm_env(monkeypatch)
     fake_glm_http(monkeypatch, status=429, payload={"error": "quota"},
@@ -238,6 +262,35 @@ def test_glm_http_503_falls_back_to_labelled_stub(monkeypatch):
     assert st["mode"] == "stub" and st["model"] == "stub"
     assert "503" in st["fallback_reason"]
     assert st["evaluation"]["passed"] is True  # lenient stub keeps demo alive
+
+
+# ---- P1 (list-shaped): no object mode; known source conflation coerced ----
+
+def test_p1_chain_list_mode_and_source_coercion(monkeypatch):
+    glm_env(monkeypatch)
+    row = main_row("m1")
+    row["source"] = "generated"  # live GLM conflation -> coerced, never user_added
+    calls = fake_glm_http(monkeypatch, payload={
+        "choices": [{"message": {
+            "content": "```json\n" + json.dumps([row]) + "\n```",
+        }}]
+    })
+    st = llm.extract_concepts_with_status("Some parsed markdown about ML.")
+    assert st["mode"] == "live" and st["model"] == "glm-4.7-flash"
+    assert st["fallback_reason"] == ""
+    assert "response_format" not in calls[0]["json"]  # P1 must not force object mode
+    assert st["concepts"][0]["source"] == "extracted"  # coerced by the validator
+
+
+def test_validator_coerces_generated_source_only():
+    row = main_row("m1")
+    row["source"] = "generated"
+    out = llm.validate_extract_shape([row])
+    assert out[0]["source"] == "extracted"
+    bad = main_row("m2")
+    bad["source"] = "user_added"
+    with pytest.raises(ValueError, match="extracted only"):
+        llm.validate_extract_shape([bad])
 
 
 def test_gemini_archived_path_still_selectable(monkeypatch):

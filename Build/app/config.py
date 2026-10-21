@@ -19,7 +19,8 @@ Env names locked (Integration_Tracker; GLM amendment S2b):
 Limits (S6, decided here so parse + routes share them):
   MAX_PDF_BYTES = 20 MiB
   PAGE_CAP for agentic_plus escalation hint = 50 pages (manual flag wins)
-  LLM_TIMEOUT_S per chain link = 30s
+  LLM_TIMEOUT_S per chain link = 60s (S2b: raised from 30 — GLM-4.7 thinking
+    + free-tier latency; measured P1 extract ~38s, P2 14-31s under load)
   PARSE_TIMEOUT_S = 120s
 
 os.environ only, .env via python-dotenv (gitignored). No keys ever logged.
@@ -44,7 +45,7 @@ DEFAULT_LLM_MODELS = DEFAULT_GLM_MODELS  # backwards-compatible alias
 
 MAX_PDF_BYTES = int(os.environ.get("MAX_PDF_BYTES", str(20 * 1024 * 1024)))
 LLAMA_PAGE_CAP = int(os.environ.get("LLAMA_PAGE_CAP", "50"))
-LLM_TIMEOUT_S = int(os.environ.get("LLM_TIMEOUT_S", "30"))
+LLM_TIMEOUT_S = int(os.environ.get("LLM_TIMEOUT_S", "60"))
 PARSE_TIMEOUT_S = int(os.environ.get("PARSE_TIMEOUT_S", "120"))
 
 

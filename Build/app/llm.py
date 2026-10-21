@@ -63,7 +63,8 @@ P1_SYSTEM = (
     "If partial say partial. "
     "Output JSON list only. Each item MUST have: concept_id (unique string), "
     "title, kind (main|sub), parent_id (null for main, main concept_id for sub), "
-    "source (always extracted — never user_added), explanation_type "
+    "source (always the literal string extracted — never user_added, never "
+    "generated — generated text belongs in explanation_source), explanation_type "
     "(definition|procedure|framework|principle), explanation_text (always "
     "non-empty; use only parsed markdown/figures, cite pages), "
     "explanation_source (extracted|generated), pages (list of ints, may be []), "
@@ -268,7 +269,14 @@ def validate_extract_shape(concepts: object) -> list[dict]:
             mains.add(cid)
         if not str(c.get("title") or "").strip():
             raise ValueError(f"missing title for {cid}")
-        if c.get("source") != "extracted":
+        if c.get("source") == "generated":
+            # Model conflation (observed on GLM-4.7-Flash): `source` is row
+            # provenance (extracted vs user_added); synthesized text belongs
+            # in explanation_source. Coerce this one value; still reject
+            # user_added/garbage.
+            c["source"] = "extracted"
+            log.info("extract: source generated -> extracted (%s)", cid)
+        elif c.get("source") != "extracted":
             raise ValueError(f"live extractor must output extracted only ({cid})")
         if c.get("explanation_type") not in _VALID_EXP_TYPES:
             raise ValueError(f"bad explanation_type for {cid}")
@@ -322,7 +330,8 @@ def _strip_code_fences(text: str) -> str:
 GLM_MAX_TOKENS = 8192
 
 
-def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int) -> str:
+def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
+                 json_mode: bool = True) -> str:
     """One GLM call via the z.ai OpenAI-compatible endpoint (S2b default).
 
     Raw httpx (already a dependency): explicit timeout, no hidden retries.
@@ -330,6 +339,10 @@ def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: i
     `reasoning_content` block; only the JSON `content` is graded. Raises on
     HTTP>=400/empty/network so the chain can advance (bad JSON is caught by
     the caller's json.loads).
+
+    json_mode requests z.ai JSON-object mode (default; P2 object output).
+    P1 passes json_mode=False: object mode nudges the model to wrap a
+    top-level list, which fails the strict extract validator (observed live).
     """
     import httpx  # type: ignore
 
@@ -341,9 +354,10 @@ def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: i
             {"role": "user", "content": user},
         ],
         "temperature": 0.2,
-        "response_format": {"type": "json_object"},
         "max_tokens": GLM_MAX_TOKENS,
     }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -361,25 +375,30 @@ def _glm_generate(model: str, system: str, user: str, api_key: str, timeout_s: i
     return text
 
 
-def _llm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int) -> str:
+def _llm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
+                  json_mode: bool = True) -> str:
     """Provider dispatcher for every live chain link (S2b).
 
     glm (default) -> _glm_generate (z.ai, free tier).
     gemini -> _gemini_generate (archived path, kept selectable).
     Unknown LLM_PROVIDER raises -> chain advances to the labelled stub.
+    json_mode is forwarded to GLM only (Gemini ignores it).
     """
     provider = config.get_llm_provider()
     if provider == "glm":
-        return _glm_generate(model, system, user, api_key, timeout_s)
+        return _glm_generate(model, system, user, api_key, timeout_s, json_mode=json_mode)
     if provider == "gemini":
-        return _gemini_generate(model, system, user, api_key, timeout_s)
+        return _gemini_generate(model, system, user, api_key, timeout_s, json_mode=json_mode)
     raise ValueError(f"unknown LLM_PROVIDER: {provider!r}")
 
 
-def _gemini_generate(model: str, system: str, user: str, api_key: str, timeout_s: int) -> str:
+def _gemini_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
+                     json_mode: bool = True) -> str:
     """One Gemini call (ARCHIVED: retired as default Oct 2026 over Gemini
     429/503 availability; selectable via LLM_PROVIDER=gemini). Raises on
-    429/5xx/network so the chain can advance."""
+    429/5xx/network so the chain can advance. json_mode is ignored: Gemini's
+    response_mime_type handles both object and list JSON."""
+    _ = json_mode
     from google import genai  # type: ignore
     from google.genai import types  # type: ignore
 
@@ -430,7 +449,10 @@ def extract_concepts_with_status(
     for model in models:
         try:
             log.info("extract: trying live model=%s", model)
-            raw = _llm_generate(model, P1_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S)
+            raw = _llm_generate(
+                model, P1_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S,
+                json_mode=False,  # P1 wants a top-level list, not object mode
+            )
             cleaned = _strip_code_fences(raw)
             try:
                 data = json.loads(cleaned)
