@@ -1,7 +1,7 @@
 // CogniMap Step 3 — L3 Apply (Locks §3 amended: app partitions 2+2, omission tier,
 // lock-passed retry same scenario, strict all-or-nothing, progress on cleared only).
 (function () {
-  let SID = '', UID = 0, current = null, titles = {}, _advanceT = null;
+  let SID = '', UID = 0, current = null, titles = {}, _pendingL4 = false, _pendingNext = false;
 
   function el(id) { return document.getElementById(id); }
   function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -69,7 +69,22 @@
     }
   }
 
+  // UI issue 1: L3 → L4 handoff (Complete banner → close panel → sidebar swap),
+  // deferred until the user closes the scenario panel after l4_ready so the
+  // final feedback can be reviewed first.
+  function finishToL4() {
+    _pendingL4 = false;
+    el('l4modal').classList.add('open'); refresh();
+    // Problem 2: stage advanced L3 → L4, show only L4 card now.
+    try { if (window.CogniMapStage && window.CogniMapStage.refreshSidebar) window.CogniMapStage.refreshSidebar('L4'); } catch (e) { /* sidebar optional */ }
+  }
+
   async function submit() {
+    // Each attempt recomputes the pending handoffs from its own response. If
+    // this submit errors out (network/400), armed flags are dropped — the user
+    // stays put and re-drives manually; close never force-advances on stale
+    // state.
+    _pendingL4 = false; _pendingNext = false;
     const rows = [...document.querySelectorAll('#scnConcepts .scn-row')];
     const selections = rows.filter(r => {
       const box = r.querySelector('[data-act=check]');
@@ -101,25 +116,33 @@
         msg += `<div class="warn">Required but not selected: ${names.join(', ')} — scenario not cleared.</div>`;
       }
       if (j.scenario_cleared) {
-        msg += `<div class="fb-ok">Scenario cleared (${j.progress.cleared}/${j.progress.total}). Generate the next one.</div>`;
         current.locked_passed = j.locked_passed;
+        renderResultsOnly(j);
+        // UI issue 1 (+ between-scenarios extension): the panel never closes
+        // or replaces itself — on any clear the user reviews the feedback,
+        // then closes the panel; the close action itself drives what happens
+        // next (finishToL4 on the final clear, generate() mid-run).
+        msg += j.l4_ready
+          ? `<div class="fb-ok">Scenario cleared (${j.progress.cleared}/${j.progress.total}) — Level 3 complete! 🎉</div>` +
+            `<div>Review the feedback above, then close this panel to continue to Level 4.</div>`
+          : `<div class="fb-ok">Scenario cleared (${j.progress.cleared}/${j.progress.total}).</div>` +
+            `<div>Review the feedback above, then close this panel for the next scenario.</div>`;
       } else {
         current.locked_passed = j.locked_passed; // failed ones stay editable, passed lock green
         renderResultsOnly(j);
       }
       el('scnMsg').innerHTML = msg;
       paint(j.progress);
-      // m4 (Locks §3 retry SAME scenario): keep auto-advance but gate on
-      // !l4_ready (never auto-fire when Level 4 is ready) + cancel on modal
-      // close so reading feedback doesn't jump. Demo unchanged (ceil(n/3)).
+      // m4 (Locks §3 retry SAME scenario) + between-scenarios extension: no
+      // timers anywhere. A failed partial keeps the user on the same scenario
+      // (generate re-serves it — active_scenario, main.py). A clear just arms
+      // a deferred handoff that the scnX close handler fires; never
+      // auto-fire when Level 4 is ready. Demo unchanged (ceil(n/3)).
       if (j.l4_ready) {
-        el('scnmodal').classList.remove('open'); el('l4modal').classList.add('open'); refresh();
-        // Problem 2: stage advanced L3 → L4, show only L4 card now.
-        try { if (window.CogniMapStage && window.CogniMapStage.refreshSidebar) window.CogniMapStage.refreshSidebar('L4'); } catch (e) { /* sidebar optional */ }
+        _pendingL4 = true;
       }
-      else if (j.scenario_cleared && !j.l4_ready) {
-        if (_advanceT) clearTimeout(_advanceT);
-        _advanceT = setTimeout(generate, 900);
+      else if (j.scenario_cleared) {
+        _pendingNext = true;
       }
     } catch (err) {
       el('scnMsg').innerHTML = `<div class="fb-bad">${esc(err.message)}</div>`;
@@ -148,8 +171,15 @@
   function init(sid, userId) {
     SID = sid; UID = userId || 0;
     el('genBtn').onclick = generate;
-    // m4: cancel pending auto-advance when the user closes the modal mid-read.
-    el('scnX').onclick = () => { if (_advanceT) { clearTimeout(_advanceT); _advanceT = null; } el('scnmodal').classList.remove('open'); };
+    // m4 + UI issue 1 (+ between-scenarios extension): closing the panel is
+    // the user-controlled transition, not a timer — after the final clear it
+    // fires the Level 4 handoff; after a mid-run clear it generates/opens the
+    // next scenario; otherwise it is just a plain close.
+    el('scnX').onclick = () => {
+      el('scnmodal').classList.remove('open');
+      if (_pendingL4) finishToL4();
+      else if (_pendingNext) { _pendingNext = false; generate(); }
+    };
     el('scnSubmit').onclick = submit;
     const t = el('toL4Btn');
     if (t) t.onclick = () => el('l4modal').classList.remove('open');

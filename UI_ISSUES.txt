@@ -1,4 +1,18 @@
 CogniMap UI Problems Tracker
 ============================
 
+1. In Stage 3, The system immediately close the activity scenario after all of generated scenario answered successfully, leaving the user have no chance to review the feedback. Instead, I want it to have the user to allow themselves to close the activity panel for review the feedback.
+
+RESOLVED (2026-10-21) — Build/static/l3.js, no server changes:
+- All auto-closes and the 900ms auto-advance timers removed. The scenario panel
+  never moves on by itself; the user always reviews the feedback first.
+- Closing the panel (x) is the single transition trigger: after the final clear
+  it opens the "Level 3 Complete!" banner (Level 4 handoff); after a mid-run
+  clear it automatically generates/opens the next scenario; otherwise it is a
+  plain close.
+- Failure path unchanged (m4): stays on the same scenario; l3/generate re-serves
+  the uncleared scenario via store.active_scenario, manual Generate reopens it.
+- Pending handoffs are recomputed on every submit attempt, so a failed/errored
+  resubmit after a clear can never force-advance on stale state.
+- Verified: node --check clean; Build/tests 44 passed.
 
