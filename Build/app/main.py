@@ -755,15 +755,24 @@ def api_l12_verify(session_id: str, payload: VerifyIn, user_id: int | None = Non
         if _phase == "phase2" and _c.get("kind") != "sub":
             raise HTTPException(400, "Main completed in Phase 1 — history-only in Phase 2")
     try:
-        # Locks §8: session/id-keyed — stub resolves the explanation
-        # server-side by owned (session_id, concept_id), never client text.
-        # Blue bypass lives in the stub (plausibility check, not doc-cited).
-        # user_id passed for defense-in-depth ownership check (§0+§8).
-        result = llm.evaluate_paraphrase(session_id, cid, text, user_id=user_id)
+        # Locks §8: session/id-keyed — resolves the explanation server-side
+        # by owned (session_id, concept_id), never client text. S2 live path
+        # returns mode/model/fallback_reason out-of-band; a valid live fail
+        # stays live; only I/O/bad-JSON failures fall back to the lenient stub.
+        eval_status = llm.evaluate_paraphrase_with_status(
+            session_id, cid, text, user_id=user_id
+        )
     except PermissionError as e:
         raise HTTPException(404, str(e))
     except KeyError:
         raise HTTPException(400, "unknown concept for this session")
+    result = eval_status["evaluation"]
+    mode = eval_status.get("mode") or "stub"
+    model = eval_status.get("model") or "stub"
+    if eval_status.get("fallback_reason"):
+        # Server-side only; never log keys (S7).
+        log.warning("l12 verify fallback %s: %s", cid,
+                    eval_status.get("fallback_reason"))
     concepts = {c["id"]: c for c in store.list_concepts(session_id)}
     c = concepts.get(cid)
     bypass = bool(c) and c.get("source") == "user_added"
@@ -775,14 +784,15 @@ def api_l12_verify(session_id: str, payload: VerifyIn, user_id: int | None = Non
         str(result.get("accuracy", "")), str(result.get("originality", "")),
         str(result.get("feedback", "")), str(result.get("hint", "")), bypass,
     )
-    status = store.l12_status(session_id)
+    progress = store.l12_status(session_id)
     l3_ready = False
-    if status["complete"] and (s.get("stage") == "L1-2"):
+    if progress["complete"] and (s.get("stage") == "L1-2"):
         store.set_stage(session_id, "L3")
         l3_ready = True
     if bypass:
         # Locks §9: blue rows carry user explanation + warning-ack + saved
-        # flag, NO accuracy/originality (bypass, no LLM).
+        # flag, NO accuracy/originality (bypass, no LLM). mode=bypass is an
+        # additive label only — the locked blue keys stay unchanged.
         blue_out = {
             "passed": passed,
             "feedback": str(result.get("feedback", "")),
@@ -791,11 +801,17 @@ def api_l12_verify(session_id: str, payload: VerifyIn, user_id: int | None = Non
             "user_explanation": text,
             "saved": passed,
             "bypass": True,
-            "progress": status,
+            "mode": mode,
+            "model": model,
+            "progress": progress,
             "l3_ready": l3_ready,
         }
         return blue_out
-    return {**result, "bypass": False, "progress": status, "l3_ready": l3_ready}
+    out = {**result, "bypass": False, "mode": mode, "model": model,
+           "progress": progress, "l3_ready": l3_ready}
+    if mode == "stub":
+        out["warning"] = "Demo mode (stubbed) — paraphrase check is lenient and not live."
+    return out
 
 
 # ---- Step 3 slice: L3 Apply generate + submit (additive) ----

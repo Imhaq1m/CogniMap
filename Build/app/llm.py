@@ -23,6 +23,11 @@ S1 live (additive): extract_concepts tries Gemini chain
 behind env flags (LLM_PROVIDER=gemini + GOOGLE_API_KEY). Keyless stays stub.
 List return shape frozen; mode/model/fallback_reason travel out-of-band via
 extract_concepts_with_status (routes use it for labelling, never 502).
+S2 live (additive): evaluate_paraphrase uses the same chain with a balanced
+rubric (accuracy + originality both pass; minor omissions allowed; hint is
+one nudge, never the answer). Blue user_added rows stay a no-LLM bypass.
+Result shape frozen; mode/model/fallback_reason travel out-of-band via
+evaluate_paraphrase_with_status.
 Prompt texts live in this module for the FYP write-up (S7).
 """
 from __future__ import annotations
@@ -93,6 +98,78 @@ def build_p1_user(markdown: str, figures: list[dict] | None) -> str:
     except Exception:
         figs_json = "[]"
     return f"{P1_RULES}\n\nMARKDOWN:\n{md}\n\nFIGURES_JSON:\n{figs_json}"
+
+
+# ---------------------------------------------------------------------------
+# S2 P2 prompts (balanced leniency: accuracy + originality both gate the
+# pass; minor omissions allowed; hint is one nudge, never the answer).
+# Stable-prefix-first for implicit caching: RULES first, REFERENCE next,
+# the variable STUDENT_PARAPHRASE last.
+# ---------------------------------------------------------------------------
+
+P2_ACCURACY_BANDS = ("Accurate", "Partly accurate", "Inaccurate")
+P2_ORIGINALITY_BANDS = ("Own words", "Too close to source")
+
+P2_SYSTEM = (
+    "You are a lenient tutor grading a student's paraphrase of one course "
+    "concept. Judge meaning over wording. Pass ONLY when BOTH hold: "
+    "(1) accuracy is 'Accurate' — the core meaning is correct and nothing "
+    "contradicts the reference; minor omissions are allowed; and (2) "
+    "originality is 'Own words' — the student restructured the sentence and "
+    "explained it in their own phrasing. Shared technical terms and short "
+    "stock phrases are expected and do NOT make an answer too close. Mark "
+    "'Too close to source' ONLY when the student copies most of the "
+    "reference sentence nearly verbatim (same structure and wording "
+    "throughout); when in doubt choose 'Own words'. Use only the supplied "
+    "REFERENCE; no external knowledge. If the answer is partial, say what is "
+    "missing without revealing the answer. Output one JSON object only with: "
+    "passed (bool), accuracy (Accurate|Partly accurate|Inaccurate), "
+    "originality (Own words|Too close to source), feedback (1-2 sentences), "
+    "hint. passed MUST equal (accuracy == 'Accurate' AND originality == 'Own "
+    "words'). On pass hint must be \"\". On fail hint is ONE short nudge "
+    "that points at the missing idea or asks for own wording and NEVER "
+    "states or paraphrases the reference answer."
+)
+
+P2_RULES = (
+    "RULES: JSON object only. accuracy exactly one of Accurate|Partly "
+    "accurate|Inaccurate. originality exactly one of Own words|Too close to "
+    "source. Pass only when accuracy=Accurate and originality=Own words. "
+    "Minor omissions are okay when the core meaning is right. Be lenient on "
+    "originality: technical terms and short stock phrases are fine; only "
+    "near-verbatim copying of most of the reference is Too close. feedback "
+    "is 1-2 sentences, lenient, and never gives the answer. hint is empty on "
+    "pass; on fail it is ONE nudge that never reveals the reference answer. "
+    "Ground only in REFERENCE."
+)
+
+
+def _clip(value: object, limit: int) -> str:
+    return str(value or "")[:limit]
+
+
+def build_p2_user(concept: dict, paraphrase: str) -> str:
+    """Build P2 user prompt from the server-resolved concept row.
+
+    Grounding (§8): the caller must pass a row fetched by owned
+    (session_id, concept_id). The only client-supplied text is the student
+    paraphrase being graded.
+    """
+    pages = concept.get("pages") or []
+    try:
+        pages_json = json.dumps(pages)
+    except Exception:
+        pages_json = "[]"
+    return (
+        f"{P2_RULES}\n\n"
+        f"REFERENCE_TITLE: {_clip(concept.get('title'), 300)}\n"
+        f"REFERENCE_TYPE: {_clip(concept.get('explanation_type') or 'definition', 80)}\n"
+        f"REFERENCE_SOURCE: {_clip(concept.get('explanation_source') or 'generated', 40)}\n"
+        f"REFERENCE_PAGES: {_clip(pages_json, 300)}\n"
+        f"REFERENCE_DIAGRAM: {_clip(concept.get('diagram_description'), 600)}\n"
+        f"REFERENCE_EXPLANATION:\n{_clip(concept.get('explanation_text'), 4000)}\n\n"
+        f"STUDENT_PARAPHRASE:\n{_clip(paraphrase, 4000)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -338,17 +415,157 @@ def llm_status() -> dict:
 
 
 # 2. evaluate_paraphrase(session_id, concept_id, paraphrase) -> {passed,...}
-def evaluate_paraphrase(session_id: str, concept_id: str, paraphrase: str,
-                        user_id: int | None = None) -> dict:
-    """Stub (Locks §8): resolves the concept server-side by owned ids.
+# S2 live: balanced rubric (accuracy + originality), Gemini chain -> stub.
+# The frozen §8 function returns the result only; mode/model/fallback_reason
+# travel out-of-band via evaluate_paraphrase_with_status (route labelling).
 
-    Ownership (§0+§8): when user_id is given, verifies
-    sessions.user_id == user_id first (route already gates via _owned;
-    this is defense-in-depth so every §8 call verifies, never session_id
-    alone). Blue (user_added): bypass LLM — non-empty user text passes with
-    plausibility-check feedback, never doc-cited. Extracted: lenient stub —
-    non-empty paraphrase passes; the real model grounds against the resolved
-    explanation_text/type/pages/diagram_description.
+_ACCURACY_ALIASES = {
+    "accurate": "Accurate",
+    "mostly accurate": "Accurate",
+    "accurate with minor omissions": "Accurate",
+    "partly accurate": "Partly accurate",
+    "partially accurate": "Partly accurate",
+    "partial": "Partly accurate",
+    "inaccurate": "Inaccurate",
+    "incorrect": "Inaccurate",
+    "wrong": "Inaccurate",
+}
+_ORIGINALITY_ALIASES = {
+    "own words": "Own words",
+    "original": "Own words",
+    "original wording": "Own words",
+    "paraphrased": "Own words",
+    "rephrased": "Own words",
+    "too close to source": "Too close to source",
+    "close to source": "Too close to source",
+    "near verbatim": "Too close to source",
+    "near-verbatim": "Too close to source",
+    "copied": "Too close to source",
+    "verbatim": "Too close to source",
+}
+_ACCURACY_LABELS = {
+    "Accurate": "Accurate — core meaning preserved (minor gaps ok)",
+    "Partly accurate": "Partly accurate — key idea missing or unclear",
+    "Inaccurate": "Inaccurate — contradicts or misses the core meaning",
+}
+_ORIGINALITY_LABELS = {
+    "Own words": "Own words — clearly rephrased",
+    "Too close to source": "Too close to source — near-verbatim",
+}
+
+
+def _normalise_band(value: object, aliases: dict[str, str],
+                    allowed: tuple[str, ...], field: str) -> str:
+    raw = str(value or "").strip().strip('"').strip("'").rstrip(".").strip()
+    key = " ".join(raw.lower().split())
+    if key in aliases:
+        return aliases[key]
+    for band in allowed:
+        if key == band.lower():
+            return band
+    raise ValueError(f"bad {field}: {value!r}")
+
+
+def validate_paraphrase_eval_shape(data: object, reference: str = "") -> dict:
+    """Strict shape + balanced pass gate on live P2 JSON.
+
+    The app owns `passed`: it is derived from the two bands so a model cannot
+    pass a near-verbatim answer or a partly-accurate one. A fail hint that
+    echoes the reference answer is replaced with a generic nudge (hints must
+    never give the answer). Raises ValueError(reason) -> caller advances the
+    chain, then falls back to the lenient stub.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("live JSON must be an object")
+    accuracy = _normalise_band(
+        data.get("accuracy"), _ACCURACY_ALIASES, P2_ACCURACY_BANDS, "accuracy"
+    )
+    originality = _normalise_band(
+        data.get("originality"), _ORIGINALITY_ALIASES, P2_ORIGINALITY_BANDS,
+        "originality",
+    )
+    feedback = data.get("feedback")
+    if not isinstance(feedback, str) or not feedback.strip():
+        raise ValueError("feedback must be a non-empty string")
+    hint = data.get("hint")
+    if hint is None:
+        hint = ""
+    if not isinstance(hint, str):
+        raise ValueError("hint must be a string")
+    passed = accuracy == "Accurate" and originality == "Own words"
+    hint = hint.strip()[:300]
+    if passed:
+        hint = ""
+    elif not hint:
+        # One generic nudge, never the answer, if the model omitted its hint.
+        hint = (
+            "Point to the key idea the reference explains, then say it in your "
+            "own words."
+        )
+    ref = (reference or "").strip()
+    if not passed and len(ref) >= 24 and ref.lower() in hint.lower():
+        # Guardrail: a hint must never be the reference answer verbatim.
+        hint = (
+            "Point to the key idea the reference explains, then say it in your "
+            "own words."
+        )
+    return {
+        "passed": passed,
+        "accuracy": _ACCURACY_LABELS[accuracy],
+        "originality": _ORIGINALITY_LABELS[originality],
+        "feedback": feedback.strip()[:800],
+        "hint": hint,
+    }
+
+
+def _stub_evaluate_paraphrase(concept: dict, paraphrase: str) -> dict:
+    """Lenient keyless/fallback check (S2 DONE gate: seed still reaches 100%)."""
+    _ = concept
+    ok = bool((paraphrase or "").strip())
+    return {
+        "passed": ok,
+        "accuracy": "Accurate — core meaning assumed (stub-grounded check)."
+        if ok else "Inaccurate — write a paraphrase first (stub-grounded check).",
+        "originality": "Own words — not compared to source (stub-grounded check)."
+        if ok else "Too close to source — no paraphrase supplied.",
+        "feedback": "Nice — captures the core meaning in your own words "
+        "(stub-grounded, doc scope)." if ok else
+        "Explain the concept in your own words, tied to the cited pages "
+        "(stub-grounded).",
+        "hint": "" if ok else
+        "Restate the explanation in your own words, tying to the cited pages "
+        "(stub-grounded hint).",
+    }
+
+
+def _blue_evaluate_paraphrase(paraphrase: str) -> dict:
+    """Blue bypass (Locks §2+§9): no LLM, plausibility only, no accuracy."""
+    text = (paraphrase or "").strip()
+    ok = bool(text)
+    return {
+        "passed": ok,
+        "feedback": "Saved — user-defined, plausibility check, not doc-cited."
+        if ok else "Write your explanation first.",
+        "hint": "" if ok else "State what your concept means in your own words.",
+        "warning_ack": "Ensure your self-defined concept is accurate — not verified against source.",
+        "user_explanation": text,
+        "saved": ok,
+    }
+
+
+def evaluate_paraphrase_with_status(
+    session_id: str, concept_id: str, paraphrase: str,
+    user_id: int | None = None,
+) -> dict:
+    """S2 live chain + labelled fallback (additive, never raises for live I/O).
+
+    Returns {evaluation, mode: live|stub|bypass, model, fallback_reason}.
+    Grounding (§8): resolves the concept row server-side by owned
+    (session_id, concept_id); only the student paraphrase is client text.
+    Blue user_added rows never call the LLM (plausibility-only bypass).
+    Chain: LLM_MODELS order -> stub on 429/5xx/bad-JSON/validation failure.
+    A valid live JSON verdict (even passed=false) is returned as live, never
+    silently replaced by the lenient stub.
     """
     if user_id is not None:
         store.require_owned_session(session_id, user_id)
@@ -357,30 +574,76 @@ def evaluate_paraphrase(session_id: str, concept_id: str, paraphrase: str,
     if not c:
         raise KeyError("unknown concept for this session")
     text = (paraphrase or "").strip()
+
     if c.get("source") == "user_added":
-        # Locks §9: blue rows carry user explanation + warning-ack + saved
-        # flag, NO accuracy/originality (bypass, no LLM).
-        ok = bool(text)
-        return {
-            "passed": ok,
-            "feedback": "Saved — user-defined, plausibility check, not doc-cited."
-            if ok else "Write your explanation first.",
-            "hint": "" if ok else "State what your concept means in your own words.",
-            "warning_ack": "Ensure your self-defined concept is accurate — not verified against source.",
-            "user_explanation": text,
-            "saved": ok,
-        }
-    ok = bool(text)
-    # m2 (Details L1-2 §4): lenient-but-plausible copy, still tagged as
-    # stub-grounded (no signature/UI change — swap model later with no UI change).
-    return {
-        "passed": ok,  # skeleton leniency: non-empty passes; real model checks grounding
-        "accuracy": "Good coverage of the source meaning (stub-grounded check).",
-        "originality": "Reads in your own words (stub-grounded check).",
-        "feedback": "Nice — captures the core meaning in your own words (stub-grounded, doc scope)."
-        if ok else "Explain the concept in your own words, tied to the cited pages (stub-grounded).",
-        "hint": "" if ok else "Restate the explanation in your own words, tying to the cited pages (stub-grounded hint).",
-    }
+        evaluation = _blue_evaluate_paraphrase(text)
+        log.info("paraphrase: mode=bypass concept=%s", concept_id)
+        return {"evaluation": evaluation, "mode": "bypass",
+                "model": "rules", "fallback_reason": ""}
+
+    if not config.is_llm_live():
+        evaluation = _stub_evaluate_paraphrase(c, text)
+        reason = "stub-default (no LLM key)"
+        log.info("paraphrase: mode=stub reason=%s", reason)
+        return {"evaluation": evaluation, "mode": "stub",
+                "model": "stub", "fallback_reason": reason}
+
+    if not text:
+        # Route rejects empty input; direct callers get an honest fail without
+        # spending a model call.
+        evaluation = _stub_evaluate_paraphrase(c, text)
+        reason = "empty paraphrase (not sent to LLM)"
+        log.info("paraphrase: mode=stub reason=%s", reason)
+        return {"evaluation": evaluation, "mode": "stub",
+                "model": "stub", "fallback_reason": reason}
+
+    api_key = config.get_google_key() or ""
+    models = config.get_llm_models()
+    user_prompt = build_p2_user(c, text)
+    last_reason = ""
+    for model in models:
+        try:
+            log.info("paraphrase: trying live model=%s concept=%s", model, concept_id)
+            raw = _gemini_generate(
+                model, P2_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S
+            )
+            data = json.loads(_strip_code_fences(raw))
+            evaluation = validate_paraphrase_eval_shape(
+                data, reference=str(c.get("explanation_text") or "")
+            )
+            log.info("paraphrase: live ok model=%s passed=%s",
+                     model, evaluation["passed"])
+            return {"evaluation": evaluation, "mode": "live",
+                    "model": model, "fallback_reason": ""}
+        except Exception as e:
+            # 429/5xx/network/bad-JSON/validation — advance the chain.
+            last_reason = f"{model}: {type(e).__name__}: {str(e)[:200]}"
+            log.warning("paraphrase: %s", last_reason)
+            continue
+
+    evaluation = _stub_evaluate_paraphrase(c, text)
+    reason = last_reason or "all live models failed — stub fallback"
+    log.warning("paraphrase: mode=stub reason=%s", reason)
+    return {"evaluation": evaluation, "mode": "stub",
+            "model": "stub", "fallback_reason": reason}
+
+
+def evaluate_paraphrase(session_id: str, concept_id: str, paraphrase: str,
+                        user_id: int | None = None) -> dict:
+    """Frozen §8 signature: returns the evaluation dict only.
+
+    Ownership (§0+§8): when user_id is given, verifies
+    sessions.user_id == user_id first (route already gates via _owned;
+    defense-in-depth so every §8 call verifies, never session_id alone).
+    Blue (user_added): bypass LLM — non-empty user text passes with
+    plausibility-check feedback, never doc-cited. Extracted: balanced live
+    rubric (accuracy + originality) with lenient stub fallback; routes use
+    evaluate_paraphrase_with_status for mode/model/warning labelling.
+    """
+    return evaluate_paraphrase_with_status(
+        session_id, concept_id, paraphrase, user_id=user_id
+    )["evaluation"]
+
 
 
 # 3. generate_scenario(chunk_ids, context_markdown) -> {scenario_id, text, concept_ids}

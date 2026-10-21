@@ -21,8 +21,8 @@ Decision: Gemini Developer API, chain gemini-3.8-flash -> gemini-3.7-flash -> ge
 - [x] GET /api/health reports {step, llama: live|stub, llm: live|stub, llm_model: which chain link served} (additive fields only)
 - [x] Document key setup for supervisor machine (which .env, no keys in repo)
 
-[S1] CURRENT — Parsing + Extract (grilled, implement first)
-------------------------------------------------------------
+[S1] DONE — Parsing + Extract (grilled, implemented)
+---------------------------------------------------
 Files: Build/app/parse.py:12 llamaparse_stub / Build/app/parse.py:44 parse_pdf, Build/app/llm.py:40 extract_concepts, Build/app/main.py:557 upload / Build/app/main.py:588 extract / Build/app/main.py:528 seed-load, Build/app/seed.json:1
 Grill status: DONE (provider=env-swappable, parse=hybrid keep-seed, keys=.env, scope=extract-only, bad-json=fallback-on-anything, honesty=labelled)
 - [x] parse_pdf(file, pdf_bytes=None): try LlamaParse tier LLAMA_TIER (default agentic, agentic_plus for complex), images_to_save ["screenshot"], expand [text, markdown, items, images_content_metadata]. Cost-optimizer allowed.
@@ -35,17 +35,18 @@ Grill status: DONE (provider=env-swappable, parse=hybrid keep-seed, keys=.env, s
 - [x] Tests: stub tests unchanged; new live tests skip without keys; new fallback tests force bad-key/bad-JSON -> assert stub shape + mode=stub.
 - [x] DONE = real PDF -> live markdown/figures -> live concepts render in Extract modal; keyless run still shows seed modal; Confirm still guards >=1 main. (verified with keys: tiny PDF -> parse live agentic -> extract live gemini-3.8-flash, 3 concepts, shape-valid; keyless stub + Confirm guards covered by pytest)
 
-[S2] NEXT — L1-2 evaluate_paraphrase (future grill)
-----------------------------------------------------
-Files: Build/app/llm.py:94 evaluate_paraphrase, Build/app/main.py:620 verify, Build/app/store.py L1-2 trail
-- [ ] Grill: leniency rubric (accuracy/originality), hint-not-answer wording, blue user_added bypass stays (no LLM, plausibility only)
-- [ ] Grounding: resolve explanation_text/type/pages/diagram_description server-side by owned ids
-- [ ] Fallback: same try-live -> stub-lenient + labelled pattern as S1
-- [ ] Trail: payload keeps paraphrase + accuracy/originality/feedback (extracted) vs user_explanation + warning-ack (blue)
-- [ ] DONE = seed 100% still triggers L3 modal with or without keys
+[S2] DONE — L1-2 evaluate_paraphrase (grilled, implemented)
+------------------------------------------------------------
+Files: Build/app/llm.py evaluate_paraphrase / evaluate_paraphrase_with_status, Build/app/main.py api_l12_verify, Build/app/store.py record_l12_attempt
+Decisions (S2 grill): balanced rubric — pass requires Accurate + Own words; minor omissions allowed; shared technical terms are not copying, only near-verbatim fails; hint is one nudge and never the answer; blue user_added bypass stays no-LLM plausibility-only.
+- [x] Grill: leniency rubric (accuracy/originality), hint-not-answer wording, blue user_added bypass stays (no LLM, plausibility only) (decided: balanced accuracy+originality; app derives passed from bands, model `passed` ignored; hint guardrail replaces a verbatim reference echo)
+- [x] Grounding: resolve explanation_text/type/pages/diagram_description server-side by owned ids (P2 prompt built from owned concept row; only student paraphrase is client text; ownership-checked twice)
+- [x] Fallback: same try-live -> stub-lenient + labelled pattern as S1 (Gemini 3.8->3.7->3.6 -> stub on 429/5xx/bad-JSON/shape fail; /l12/verify adds mode/model + stub warning; valid live fail stays live, never silently passes)
+- [x] Trail: payload keeps paraphrase + accuracy/originality/feedback (extracted) vs user_explanation + warning-ack (blue) (pytest seed-100 checks both shapes; blue rows omit accuracy/originality)
+- [x] DONE = seed 100% still triggers L3 modal with or without keys (keyless pytest 6/6 -> l3_ready + stage L3; mocked-live 6/6 with blue skipping the model; real-key run: live c1/c2 passed, c3-c5 labelled stub fallback on 429/503, c6 bypass, still 100% -> L3)
 
-[S3] FUTURE — L3 generate_scenario + evaluate_scenario (future grill)
------------------------------------------------------------------------
+[S3] NEXT — L3 generate_scenario + evaluate_scenario (future grill)
+-------------------------------------------------------------------
 Files: Build/app/llm.py:142 generate_scenario, Build/app/llm.py:154 evaluate_scenario, Build/app/main.py:699 generate / Build/app/main.py:746 submit, Build/app/store.py partition/chunks
 - [ ] Grill: app owns partition (chunks of 3, 2+2 remainder, n=1 exception, ceil(n/3) total); LLM verbalizes only, returns chunk ids unchanged
 - [ ] Context: context_markdown may carry mains as background in phase2, never pooled/chunked (Locks section 3)
@@ -81,18 +82,18 @@ Files: Build/app/llm.py:236 probe_link, Build/app/main.py:903 probe, Build/app/s
 [S8] Testing / reviewer gates
 -------------------------------
 - [x] Keep pytest Build/tests green keyless (isolated COGNIMAP_DB pattern in Build/tests/test_locks.py:14)
-- [x] New: test_live_skip (skipif no key), test_fallback_labels (bad key/JSON -> stub + mode), test_extract_shape (live or stub both pass Confirm guards)
+- [x] New: test_live_skip (skipif no key), test_fallback_labels (bad key/JSON -> stub + mode), test_extract_shape (live or stub both pass Confirm guards) (S2: Build/tests/test_integration_s2.py covers rubric/prompt, server-resolved grounding, balanced pass gate, hint guardrail, blue no-LLM bypass, bad-key/bad-JSON fallback, keyless + mocked-live seed 100% -> L3)
 - [ ] Reviewer per slice vs Steps_Locks.md (counts, lock-passed, Finish, trail writes)
 
 Rollout order
 --------------
-1. S1 parse+extract (now) -> 2. S2 paraphrase -> 3. S3 scenario -> 4. S5 probe. S4 untouched. S6/S7/S8 ride along each slice.
+1. S1 parse+extract (done) -> 2. S2 paraphrase (done) -> 3. S3 scenario (next) -> 4. S5 probe. S4 untouched. S6/S7/S8 ride along each slice.
 
 [S9] Prompts per stage (draft, model-agnostic JSON-only)
 ---------------------------------------------------------
 All server-side: resolve text by owned ids first, never trust client text, then inject into {braces}.
 - [x] P1 extract_concepts(markdown, figures): system "extract study concepts from course docs only, no external knowledge; synthesize scope-grounded text when missing, mark generated + cite pages; if partial say partial." User injects MARKDOWN + FIGURES_JSON + RULES (JSON list only, fields concept_id/title/kind:main|sub/parent_id/source:extracted/explanation_type/explanation_text/explanation_source:extracted|generated/pages/diagram_refs/diagram_description; link figures via page overlap; never user_added). Retry once on bad JSON -> stub fallback. (implemented in llm.py: P1_SYSTEM + build_p1_user, chain advances on bad JSON)
-- [ ] P2 evaluate_paraphrase: system "lenient tutor, meaning over wording, hints never answers." User injects REFERENCE explanation_text + TYPE + PAGES + DIAGRAM + STUDENT paraphrase -> {passed,accuracy,originality,feedback,hint}. Pass if core meaning in own words. Blue user_added: skip prompt, code bypass with plausibility-check + warning_ack.
+- [x] P2 evaluate_paraphrase: system "lenient tutor, meaning over wording, hints never answers." User injects REFERENCE explanation_text + TYPE + PAGES + DIAGRAM + STUDENT paraphrase -> {passed,accuracy,originality,feedback,hint}. Pass if core meaning in own words. Blue user_added: skip prompt, code bypass with plausibility-check + warning_ack. (implemented in llm.py: P2_SYSTEM + build_p2_user + validate_paraphrase_eval_shape; balanced bands, app derives passed; hint guardrail; blue bypass in code)
 - [ ] P3 generate_scenario: system "verbalize only, do not invent concepts." User injects CHUNK_IDS (2-3, 1 only if n==1) + CONTEXT + MAINS_BACKGROUND display-only -> {scenario_id,text,concept_ids:chunk unchanged}. App validates ids == chunk.
 - [ ] P4 evaluate_scenario: system "grade per-selection vs scenario facts + reference; tier 1 wrong-concept not-related, tier 2 right-concept wrong-justification hint, tier 3 pass." Per-selection inject SCENARIO + CONCEPT title/text/pages + JUSTIFICATION + BLUE flag (user text as ground, prefix "user-defined — plausibility check, not doc-cited"). Return {concept_id,passed,feedback,hint}. App computes missed_ids + cleared (missed empty AND all passed).
 - [ ] P5 probe_link: system "probing analyst, grade Why/Fail independently, side-targeted hints." Inject EDGE A -type-> B + A_REF + B_REF + BLUE flag + WHY_ANSWER + FAIL_ANSWER -> {why_passed,why_feedback,why_hint,fail_passed,fail_feedback,fail_hint}. Same prompts for custom edges. App brightens only when both true.

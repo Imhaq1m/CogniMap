@@ -203,6 +203,7 @@
           `<div class="${ok ? 'fb-ok' : 'fb-bad'}">${ok ? '✔ Correct' : 'Needs work'}</div>` +
           `<div>Accuracy: ${esc(j.accuracy)} · Originality: ${esc(j.originality)}</div>
              <div>${esc(j.feedback)}</div>` +
+            (j.warning ? `<div class="fb-hint">${esc(j.warning)}</div>` : '') +
             (j.hint ? `<div class="fb-hint">Hint: ${esc(j.hint)}</div>` : '');
       }
       paintProgress(j.progress);
