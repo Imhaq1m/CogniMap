@@ -4,9 +4,10 @@ pytest==8.3.4
 httpx==0.28.1
 python-multipart==0.0.20
 python-dotenv==1.0.1
-google-genai==1.16.0
 llama-cloud>=2.8
-# S1/S2 live: LlamaParse (agentic tier) + provider chain behind env flags.
-# Default provider (S2c): Groq qwen/qwen3.8-27b via raw httpx (Groq free tier) — no new dep.
-# Archived: google-genai above is the LLM_PROVIDER=gemini path (not default).
+# S1/S2 live: LlamaParse (agentic tier) + the LLM chain behind env flags.
+# (S2f: Google as default S1; archived S2b) -> GLM (S2b) -> Groq (S2c) ->
+# LM Studio (S2d) -> Groq (S2e), then the archived Gemini + LM Studio paths
+# AND the google-genai dependency were removed entirely (S2f). The chain is
+# Groq qwen/qwen3.8-27b on raw httpx — no extra LLM dependency.
 # Keyless CI stays stub (live tests skip, fallback tests force stub).

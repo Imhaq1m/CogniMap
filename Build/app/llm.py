@@ -18,10 +18,12 @@ scope all reads to that session (multi-session isolation, doc-scope
 grounding). Real model implementations MUST repeat the ownership check
 first (see Steps_Locks §8).
 
-S1 live (additive): extract_concepts tries the configured provider chain behind
-env flags (S2c default: qwen/qwen3.8-27b on Groq -> stub; archived:
-LLM_PROVIDER=gemini runs gemini-3.8-flash -> gemini-3.7-flash -> gemini-3.6-flash).
-Keyless stays stub.
+S1 live (additive): extract_concepts tries the mixed LLM chain behind env
+flags (S2h, grill G-Route: links routed BY MODEL ID — qwen/* -> free Groq,
+deepseek-* -> paid DeepSeek with thinking disabled; free-first default
+qwen/qwen3.8-27b -> deepseek-flash; the archived Gemini and LM Studio paths
+were removed entirely in S2f and unroutable links raise, falling through to
+the next link or the labelled stub). Keyless stays stub.
 List return shape frozen; mode/model/fallback_reason travel out-of-band via
 extract_concepts_with_status (routes use it for labelling, never 502).
 S2 live (additive): evaluate_paraphrase uses the same chain with a balanced
@@ -276,15 +278,29 @@ def validate_extract_shape(concepts: object) -> list[dict]:
             mains.add(cid)
         if not str(c.get("title") or "").strip():
             raise ValueError(f"missing title for {cid}")
-        if c.get("source") == "generated":
+        src = str(c.get("source") or "").strip().lower()
+        if src == "generated":
             # Model conflation (first observed on GLM-4.7-Flash, kept
             # defensive): `source` is row provenance (extracted vs user_added);
             # synthesized text belongs in explanation_source. Coerce this one
-            # value; still reject user_added/garbage.
+            # value; still reject user_added.
             c["source"] = "extracted"
             log.info("extract: source generated -> extracted (%s)", cid)
-        elif c.get("source") != "extracted":
+        elif src == "extracted":
+            pass
+        elif src == "user_added":
+            # Hard guardrail: a live extractor must never mint user-added rows.
             raise ValueError(f"live extractor must output extracted only ({cid})")
+        else:
+            # Gemma-4 conflation (2026-10-22): the model treats `source` as
+            # "the concept's origin text" and puts a section title/copied
+            # phrase there (e.g. "Machine Learning") or omits it. Same lenient
+            # normalisation as the generated->extracted coercion: provenance
+            # is never anything but extracted from a live extractor, so coerce
+            # and log — a hard reject would stub-fallback an otherwise
+            # perfectly shaped row.
+            c["source"] = "extracted"
+            log.info("extract: source %r -> extracted (%s)", src[:60], cid)
         if c.get("explanation_type") not in _VALID_EXP_TYPES:
             raise ValueError(f"bad explanation_type for {cid}")
         if not str(c.get("explanation_text") or "").strip():
@@ -332,35 +348,63 @@ def _strip_code_fences(text: str) -> str:
     return t
 
 
-# Groq free-tier OTPM (output tokens/min) is 1000 for qwen3.8-27b: every
-# request's max_tokens reserves against that budget, so caps stay small and
-# leave room for the next demo click (extract -> verify within a minute).
+# Groq free-tier pacing (tracker [S2b->S2e]): the per-key windows are rpm 30
+# / rpd 1000 / tpm 8000 prompt+completion / tpd 200000 for qwen3.8-27b, and
+# the measured 429 strings quoted OTPM 1000 with each request's max_tokens
+# reserving against it. Under either reading the completion cap stays well
+# below the per-minute budget, so the next demo click (extract -> verify
+# inside a minute) is never blocked by our own cap.
 GROQ_MAX_TOKENS = 200            # P2: short JSON (feedback + one nudge)
-GROQ_MAX_TOKENS_EXTRACT = 850    # P1: list (per-request cap must stay < 1000)
+GROQ_MAX_TOKENS_EXTRACT = 850    # P1: list (well under any per-minute window)
+# DeepSeek is pay-as-you-go (no free-tier token windows), but the same
+# conservative caps keep P2/P1 outputs short and comparable for the
+# latency benchmark (S2g) — generation cost does not dominate the demo.
+DEEPSEEK_MAX_TOKENS = 200            # P2
+DEEPSEEK_MAX_TOKENS_EXTRACT = 850    # P1
+# S2g+ probe (2026-10-23): deepseek-flash thinks by default and the effort
+# knob (low|high|max) does NOT turn that off (effort=low still burned ~209
+# reasoning tokens; reasoning counts inside max_tokens -> empty content and
+# every call stubbed). The working off-switch is the GLM-style field, same
+# mechanism as the S2b GLM thinking quirk reading / S2d Gemma reasoning_effort
+# finding; reasoning_effort:"none" also worked (measured) but this is the
+# documented semantic switch. The old deepseek-chat alias = this same flash
+# model with thinking already off server-side.
+DEEPSEEK_THINKING_OFF = {"thinking": {"type": "disabled"}}
 
 
-def _groq_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
-                   json_mode: bool = True, max_tokens: int | None = None) -> str:
-    """One Groq call via the OpenAI-compatible endpoint (S2c default).
+def _max_tokens(extract: bool = False) -> int:
+    """Output cap by call shape (S2h: identical pacing on both providers)."""
+    return GROQ_MAX_TOKENS_EXTRACT if extract else GROQ_MAX_TOKENS
+
+
+def _openai_compatible_generate(
+    model: str, system: str, user: str, api_key: str, base_url: str,
+    timeout_s: int, json_mode: bool = True, max_tokens: int | None = None,
+    default_max_tokens: int = GROQ_MAX_TOKENS,
+    extra_body: dict | None = None,
+) -> str:
+    """One OpenAI-compatible chat-completions call (the Groq transport).
 
     Raw httpx (already a dependency): explicit timeout, no hidden retries.
-    Groq's LPU inference answers in well under a second for these prompts;
-    only the JSON `content` is read (any reasoning fields are ignored). Raises
+    Only the JSON `content` is read (any reasoning fields are ignored). Raises
     on HTTP>=400/empty/network so the chain can advance (bad JSON is caught by
     the caller's json.loads).
 
-    json_mode requests JSON-object mode (default; P2 object output).
-    P1 passes json_mode=False: object mode nudged a previous provider to wrap
-    a top-level list, which fails the strict extract validator. Kept off for
-    list-shaped calls.
+    json_mode requests JSON-object mode (default; P2 object output) via
+    response_format {"type": "json_object"}. P1 always passes json_mode=False:
+    object mode nudged a previous provider (S2b GLM) to wrap a top-level
+    list, which fails the strict extract validator. P2 feedback is a short
+    JSON object, so json_mode stays on for it.
 
-    max_tokens defaults to GROQ_MAX_TOKENS (P2). P1 passes the extract cap;
-    both stay under the free-tier OTPM (1000/min) because each request's
-    max_tokens reserves against that budget.
+    max_tokens falls back to default_max_tokens (the P2 cap).
+
+    extra_body (S2g+): provider-specific payload fields merged last (e.g.
+    DeepSeek's thinking toggle). None (Groq) keeps the S2f-era body
+    byte-for-byte unchanged.
     """
     import httpx  # type: ignore
 
-    url = f"{config.get_groq_base_url()}/chat/completions"
+    url = f"{base_url.rstrip('/')}/chat/completions"
     payload = {
         "model": model,
         "messages": [
@@ -368,10 +412,12 @@ def _groq_generate(model: str, system: str, user: str, api_key: str, timeout_s: 
             {"role": "user", "content": user},
         ],
         "temperature": 0.2,
-        "max_tokens": max_tokens or GROQ_MAX_TOKENS,
+        "max_tokens": max_tokens or default_max_tokens,
     }
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+    if extra_body:
+        payload.update(extra_body)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -389,55 +435,65 @@ def _groq_generate(model: str, system: str, user: str, api_key: str, timeout_s: 
     return text
 
 
+def _groq_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
+                   json_mode: bool = True, max_tokens: int | None = None) -> str:
+    """One Groq call (S2e default; free tier, LPU-fast)."""
+    return _openai_compatible_generate(
+        model, system, user, api_key, config.get_groq_base_url(),
+        timeout_s, json_mode=json_mode, max_tokens=max_tokens,
+        default_max_tokens=GROQ_MAX_TOKENS,
+    )
+
+
+def _deepseek_generate(model: str, system: str, user: str, api_key: str,
+                       timeout_s: int, json_mode: bool = True,
+                       max_tokens: int | None = None) -> str:
+    """One DeepSeek call (S2h mixed chain: paid failover link — or primary if
+    LLM_MODELS reorders; pinned S2g+ to deepseek-flash = DeepSeek-V4.1-Flash,
+    pay-as-you-go, OpenAI-compatible).
+
+    Same transport as Groq (plus one extra_body field). DeepSeek's
+    response_format {"type": "json_object"} requires the word 'json' in the
+    messages — both the P2 system text ("Output one JSON object only") and
+    the P1 rules ("RULES: JSON list only") already carry it, so json_mode
+    passes through exactly like Groq's.
+
+    Thinking off (S2g+ probe, 2026-10-23): deepseek-flash THINKS by default
+    (reasoning tokens count inside max_tokens, leaving content empty -> every
+    call would fall to the stub). The model's effort levels (low|high|max)
+    do NOT disable it (measured: effort=low still burned ~209 reasoning
+    tokens at a 400-cap); the working switches are thinking {"type":
+    "disabled"} (GLM-style, wired here) or reasoning_effort "none". The old
+    deepseek-chat alias is served by the same flash model with thinking
+    already off — the pinned pair below reproduces that explicitly so the
+    config names the real served model.
+    """
+    return _openai_compatible_generate(
+        model, system, user, api_key, config.get_deepseek_base_url(),
+        timeout_s, json_mode=json_mode, max_tokens=max_tokens,
+        default_max_tokens=DEEPSEEK_MAX_TOKENS,
+        extra_body=DEEPSEEK_THINKING_OFF,
+    )
+
+
 def _llm_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
                   json_mode: bool = True, max_tokens: int | None = None) -> str:
-    """Provider dispatcher for every live chain link (S2c).
+    """Router for every live chain link (S2h mixed chain; grill G-Route).
 
-    groq (default) -> _groq_generate (free tier, LPU-fast).
-    gemini -> _gemini_generate (archived path, kept selectable).
-    Unknown LLM_PROVIDER raises -> chain advances to the labelled stub.
-    json_mode and max_tokens are forwarded to Groq only (Gemini ignores them).
+    Links are routed BY MODEL ID, not by a global provider switch:
+    qwen/* -> _groq_generate (free tier, LPU-fast; G3 first link),
+    deepseek-* -> _deepseek_generate (paid failover, thinking off; G3 last
+    link). Unroutable ids raise -> the chain advances to the next link and,
+    after all fail, the labelled stub answers (never 502).
     """
-    provider = config.get_llm_provider()
+    provider = config.model_provider(model)
     if provider == "groq":
         return _groq_generate(model, system, user, api_key, timeout_s,
                               json_mode=json_mode, max_tokens=max_tokens)
-    if provider == "gemini":
-        return _gemini_generate(model, system, user, api_key, timeout_s, json_mode=json_mode)
-    raise ValueError(f"unknown LLM_PROVIDER: {provider!r}")
-
-
-def _gemini_generate(model: str, system: str, user: str, api_key: str, timeout_s: int,
-                     json_mode: bool = True) -> str:
-    """One Gemini call (ARCHIVED: retired as default Oct 2026 over Gemini
-    429/503 availability; selectable via LLM_PROVIDER=gemini). Raises on
-    429/5xx/network so the chain can advance. json_mode is ignored: Gemini's
-    response_mime_type handles both object and list JSON."""
-    _ = json_mode
-    from google import genai  # type: ignore
-    from google.genai import types  # type: ignore
-
-    client = genai.Client(api_key=api_key)
-    try:
-        resp = client.models.generate_content(
-            model=model,
-            contents=user,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                temperature=0.2,
-                response_mime_type="application/json",
-            ),
-        )
-    finally:
-        try:
-            client.close()
-        except Exception:
-            pass
-    _ = timeout_s
-    text = getattr(resp, "text", "") or ""
-    if not text.strip():
-        raise ValueError(f"{model} returned empty response")
-    return text
+    if provider == "deepseek":
+        return _deepseek_generate(model, system, user, api_key, timeout_s,
+                                  json_mode=json_mode, max_tokens=max_tokens)
+    raise ValueError(f"unroutable LLM chain link: {model!r}")
 
 
 def extract_concepts_with_status(
@@ -446,7 +502,8 @@ def extract_concepts_with_status(
     """S1 live chain + labelled fallback (additive, never raises).
 
     Returns {concepts, mode: live|stub, model, fallback_reason}.
-    Chain: LLM_MODELS order (groq default; gemini chain archived) -> stub.
+    Chain: mixed LLM_MODELS (S2h; free-first by default: qwen -> flash) routed
+    BY MODEL ID, one attempt per link -> stub.
     On 429/5xx/bad-JSON/validation fail, advance to next link; after all
     fail, seed-grounded stub. Never 502 in demo. Logs fallback_reason
     server-side without keys.
@@ -454,20 +511,25 @@ def extract_concepts_with_status(
     figs = list(figures or [])
     if not config.is_llm_live():
         concepts = _stub_extract_concepts(markdown, figs)
-        reason = "stub-default (no LLM key)"
+        reason = "stub-default (no key on any chain link)"
         log.info("extract: mode=stub reason=%s", reason)
         return {"concepts": concepts, "mode": "stub", "model": "stub", "fallback_reason": reason}
-    api_key = config.get_llm_key() or ""
     models = config.get_llm_models()
     user_prompt = build_p1_user(markdown, figs)
     last_reason = ""
+    skipped: list[str] = []
     for model in models:
+        api_key = config.get_llm_key(model)  # per-link key (never logged)
+        if not api_key:
+            skipped.append(model)
+            log.info("extract: %s: skipped (provider key absent)", model)
+            continue
         try:
             log.info("extract: trying live model=%s", model)
             raw = _llm_generate(
                 model, P1_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S,
                 json_mode=False,  # P1 wants a top-level list, not object mode
-                max_tokens=GROQ_MAX_TOKENS_EXTRACT,  # free-tier OTPM pacing (S2c)
+                max_tokens=_max_tokens(extract=True),  # shape-paced caps
             )
             cleaned = _strip_code_fences(raw)
             try:
@@ -500,6 +562,8 @@ def extract_concepts_with_status(
             continue
     concepts = _stub_extract_concepts(markdown, figs)
     reason = last_reason or "all live models failed — stub fallback"
+    if skipped:
+        reason += f" [+ unkeyed links skipped: {', '.join(skipped)}]"
     log.warning("extract: mode=stub reason=%s", reason)
     return {"concepts": concepts, "mode": "stub", "model": "stub", "fallback_reason": reason}
 
@@ -669,8 +733,8 @@ def evaluate_paraphrase_with_status(
     Grounding (§8): resolves the concept row server-side by owned
     (session_id, concept_id); only the student paraphrase is client text.
     Blue user_added rows never call the LLM (plausibility-only bypass).
-    Chain: provider chain (groq default; gemini archived) -> stub on
-    429/5xx/bad-JSON/validation failure.
+    Chain: mixed LLM_MODELS routed BY MODEL ID (S2h; free-first by default:
+    qwen -> flash) -> stub on 429/5xx/bad-JSON/validation failure.
     A valid live JSON verdict (even passed=false) is returned as live, never
     silently replaced by the lenient stub.
     """
@@ -690,7 +754,7 @@ def evaluate_paraphrase_with_status(
 
     if not config.is_llm_live():
         evaluation = _stub_evaluate_paraphrase(c, text)
-        reason = "stub-default (no LLM key)"
+        reason = "stub-default (no key on any chain link)"
         log.info("paraphrase: mode=stub reason=%s", reason)
         return {"evaluation": evaluation, "mode": "stub",
                 "model": "stub", "fallback_reason": reason}
@@ -704,11 +768,16 @@ def evaluate_paraphrase_with_status(
         return {"evaluation": evaluation, "mode": "stub",
                 "model": "stub", "fallback_reason": reason}
 
-    api_key = config.get_llm_key() or ""
     models = config.get_llm_models()
     user_prompt = build_p2_user(c, text)
     last_reason = ""
+    skipped: list[str] = []
     for model in models:
+        api_key = config.get_llm_key(model)  # per-link key (never logged)
+        if not api_key:
+            skipped.append(model)
+            log.info("paraphrase: %s: skipped (provider key absent)", model)
+            continue
         try:
             log.info("paraphrase: trying live model=%s concept=%s", model, concept_id)
             raw = _llm_generate(
@@ -730,6 +799,8 @@ def evaluate_paraphrase_with_status(
 
     evaluation = _stub_evaluate_paraphrase(c, text)
     reason = last_reason or "all live models failed — stub fallback"
+    if skipped:
+        reason += f" [+ unkeyed links skipped: {', '.join(skipped)}]"
     log.warning("paraphrase: mode=stub reason=%s", reason)
     return {"evaluation": evaluation, "mode": "stub",
             "model": "stub", "fallback_reason": reason}

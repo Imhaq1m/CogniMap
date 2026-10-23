@@ -58,10 +58,10 @@ def blue_row(cid="b1"):
 
 
 def force_live(monkeypatch):
-    # S2c default provider: Groq qwen/qwen3.8-27b; Gemini stays archived.
-    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    # S2h: free-first mixed chain — first (Groq) link serves mocked-live calls.
     monkeypatch.setenv("GROQ_API_KEY", "dummy-key-not-logged")
-    monkeypatch.delenv("LLM_MODELS", raising=False)  # provider default chain
+    monkeypatch.delenv("GROQ_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODELS", raising=False)  # default mixed chain
 
 
 def live_json(accuracy="Accurate", originality="Own words",
@@ -341,8 +341,7 @@ def test_l12_js_shows_stub_warning_additively():
 
 
 def test_seed_100_keyless_triggers_l3(monkeypatch):
-    for k in ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
-              "GROQ_API_KEY"):
+    for k in ("LLAMA_CLOUD_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     u = mk_user("seedU")
     s = mk_session(u["id"])

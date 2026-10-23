@@ -25,8 +25,7 @@ from app.main import app
 client = TestClient(app)
 
 # Every LLM key the code understands — forced absent to prove stub paths.
-_KEYLESS_ENV = ("LLAMA_CLOUD_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
-                "GROQ_API_KEY")
+_KEYLESS_ENV = ("LLAMA_CLOUD_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY")
 
 
 def mk_user(prefix="s1"):
@@ -98,8 +97,7 @@ def test_extract_with_status_stub_labels(monkeypatch):
 # ---- fallback: bad key / bad JSON -> stub + mode=stub (never 502) ----
 
 def test_fallback_bad_key_goes_stub(monkeypatch):
-    # S2c: default provider is Groq; chain fails -> labelled stub, never 502.
-    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    # S2h: links route by id; chain fails -> labelled stub, never 502.
     monkeypatch.setenv("GROQ_API_KEY", "bad-key-for-test")
     monkeypatch.delenv("LLM_MODELS", raising=False)
     # Force the chain to fail fast without network.
@@ -112,7 +110,6 @@ def test_fallback_bad_key_goes_stub(monkeypatch):
 
 
 def test_fallback_bad_json_goes_stub(monkeypatch):
-    monkeypatch.setenv("LLM_PROVIDER", "groq")
     monkeypatch.setenv("GROQ_API_KEY", "dummy")
     monkeypatch.delenv("LLM_MODELS", raising=False)
     monkeypatch.setattr(llm, "_llm_generate", lambda *a, **k: "not-json {{{")
