@@ -850,18 +850,31 @@ def api_l3_generate(session_id: str, user_id: int | None = None):
                 "locked_passed": locked, "progress": st, "pool": st["counted"]}
     chunk = store.partition_chunks(st["uncovered"])[0]
     concepts = {c["id"]: c for c in store.list_concepts(session_id)}
+    # S3 (G1): server-resolved chunk rows feed the live P3 lanes; the frozen
+    # joined string stays the stub's context (keyless behaviour unchanged).
+    chunk_rows = [concepts[cid] for cid in chunk if cid in concepts]
     context = "; ".join(
         f"{cid}: {(concepts.get(cid) or {}).get('explanation_text', '')}" for cid in chunk
     )
     # Locks §3+§7: context may carry mains as display-only background in
     # Phase-2 — never chunked/pooled (pool=counted subs, scenario_ids hidden).
+    mains_rows: list[dict] = []
     if st.get("phase") == "phase2":
+        mains_rows = [c for c in store.list_concepts(session_id)
+                      if c.get("kind") == "main"]
         mains_bg = "; ".join(
-            f"{c['id']}: {c.get('explanation_text','')}"
-            for c in store.list_concepts(session_id) if c.get("kind") == "main")
+            f"{c['id']}: {c.get('explanation_text','')}" for c in mains_rows)
         if mains_bg:
             context = (context + " | mains background: " + mains_bg) if context else mains_bg
-    gen = llm.generate_scenario(chunk, context)  # app owns partition; LLM verbalizes
+    # S3 live chain (labelled): app owns partition; the model verbalizes only
+    # and must echo the chunk ids. fallback_reason logs server-side only (S7).
+    gen_status = llm.generate_scenario_with_status(
+        chunk, context, chunk_rows=chunk_rows, mains_rows=mains_rows
+    )
+    gen = gen_status["scenario"]
+    if gen_status.get("fallback_reason"):
+        log.warning("l3 generate fallback %s: %s", session_id,
+                    gen_status.get("fallback_reason"))
     try:
         row = store.create_scenario(session_id, chunk, gen["text"],
                                     user_id=int(s["user_id"]))
@@ -869,9 +882,15 @@ def api_l3_generate(session_id: str, user_id: int | None = None):
         raise HTTPException(404, str(e))
     except (ValueError, KeyError) as e:
         raise HTTPException(400, str(e))
-    return {"id": row["id"], "scenario_id": row["id"], "text": row.get("text", ""),
-            "locked_passed": [], "progress": store.l3_status(session_id),
-            "pool": st["counted"]}
+    out = {"id": row["id"], "scenario_id": row["id"], "text": row.get("text", ""),
+           "locked_passed": [], "progress": store.l3_status(session_id),
+           "pool": st["counted"],
+           "mode": gen_status.get("mode") or "stub",
+           "model": gen_status.get("model") or "stub"}
+    if out["mode"] == "stub":
+        out["warning"] = ("Demo mode (stubbed) — scenario text is "
+                          "stub-backed and not live.")
+    return out
 
 
 @app.post("/api/sessions/{session_id}/l3/submit")
@@ -911,11 +930,20 @@ def api_l3_submit(session_id: str, payload: L3SubmitIn, user_id: int | None = No
         for cid in sub if cid not in locked
     ]
     try:
-        ev = llm.evaluate_scenario(session_id, scn["id"], unlocked_sels, user_id=user_id)
+        # S3 live chain (labelled): ONE merged call grades only the live
+        # lanes (tier-1/empty/locked stay rule-based; blue joins per G2').
+        ev_status = llm.evaluate_scenario_with_status(
+            session_id, scn["id"], unlocked_sels, user_id=user_id
+        )
     except PermissionError as e:
         raise HTTPException(404, str(e))
     except KeyError as e:
         raise HTTPException(400, str(e))
+    ev = ev_status["evaluation"]
+    if ev_status.get("fallback_reason"):
+        # Server-side only; never log keys (S7).
+        log.warning("l3 submit fallback %s/%s: %s", session_id, scn["id"],
+                    ev_status.get("fallback_reason"))
     newly_passed: set[str] = set()
     results: list[dict] = []
     for r in ev.get("results", []):
@@ -952,8 +980,15 @@ def api_l3_submit(session_id: str, payload: L3SubmitIn, user_id: int | None = No
     if progress["complete"] and (s.get("stage") == "L3"):
         store.set_stage(session_id, "L4")
         l4_ready = True
-    return {"results": results, "missed_ids": missed, "scenario_cleared": cleared_now,
-            "locked_passed": sorted(locked | newly_passed), "progress": progress, "l4_ready": l4_ready}
+    out = {"results": results, "missed_ids": missed, "scenario_cleared": cleared_now,
+            "locked_passed": sorted(locked | newly_passed), "progress": progress,
+            "l4_ready": l4_ready,
+            "mode": ev_status.get("mode") or "stub",
+            "model": ev_status.get("model") or "stub"}
+    if out["mode"] == "stub":
+        out["warning"] = ("Demo mode (stubbed) — justification grading is "
+                          "lenient and not live.")
+    return out
 
 
 # ---- Step 4 slice: L4 Analyze (additive) ----

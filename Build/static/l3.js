@@ -63,6 +63,8 @@
       titles = {};
       concepts.forEach(c => { titles[c.id] = c.title; });
       render();
+      // S7 banner (additive only): stub mode keeps the locked flow visible.
+      if (j.warning) el('scnMsg').innerHTML = `<div class="warn">${esc(j.warning)}</div>`;
       el('scnmodal').classList.add('open');
     } catch (err) {
       el('l3progress').innerHTML = 'Level 3 [Apply] — ' + esc(err.message);
@@ -131,6 +133,8 @@
         current.locked_passed = j.locked_passed; // failed ones stay editable, passed lock green
         renderResultsOnly(j);
       }
+      // S7 banner (additive): stub submit grading warns inside the panel.
+      if (j.warning) msg = `<div class="warn">${esc(j.warning)}</div>` + msg;
       el('scnMsg').innerHTML = msg;
       paint(j.progress);
       // m4 (Locks §3 retry SAME scenario) + between-scenarios extension: no

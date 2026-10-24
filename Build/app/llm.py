@@ -31,6 +31,17 @@ rubric (accuracy + originality both pass; minor omissions allowed; hint is
 one nudge, never the answer). Blue user_added rows stay a no-LLM bypass.
 Result shape frozen; mode/model/fallback_reason travel out-of-band via
 evaluate_paraphrase_with_status.
+S3 live (additive): generate_scenario (P3) + evaluate_scenario (P4) join the
+chain. P3 verbalizes ONLY the app-partitioned chunk — ids echoed unchanged
+(validated) and titles never copied verbatim into the text. P4 grades a
+submit in ONE merged call per submit: tier-1 wrong picks, empty
+justifications and omissions are rule-based BEFORE the chain (G4/G7 —
+retries never re-spend tokens); blue user_added selections JOIN the call as
+lanes (G2'/G8, amending the S2h no-LLM carry: ground = the user's own saved
+user's own saved explanation, lenient-consistency rubric, "user-defined —
+plausibility check, not doc-cited" prefix enforced app-side, never
+page-cited). A valid live fail stays live; mode=rules labels pure
+rule-based submits; strict clear math stays app-side.
 Prompt texts live in this module for the FYP write-up (S7).
 """
 from __future__ import annotations
@@ -87,8 +98,10 @@ P1_RULES = (
 
 def build_p1_user(markdown: str, figures: list[dict] | None) -> str:
     figs = figures or []
-    # Truncate markdown to keep demo prompts bounded (full doc still sent when short).
-    md = (markdown or "")[:12000]
+    # S3 G5 trim (parked decision -> implemented): 12000 -> 8000 chars. An
+    # extract drops to ~2.8-3k total tokens inside the Groq tpm window,
+    # buying burst headroom now that P3/P4 share the chain; provider-agnostic.
+    md = (markdown or "")[:8000]
     try:
         figs_json = json.dumps(
             [
@@ -181,6 +194,294 @@ def build_p2_user(concept: dict, paraphrase: str) -> str:
         f"REFERENCE_EXPLANATION:\n{_clip(concept.get('explanation_text'), 4000)}\n\n"
         f"STUDENT_PARAPHRASE:\n{_clip(paraphrase, 4000)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S3 P3/P4 prompts (grill ledger G1-G8, model-agnostic JSON-only).
+# Stable-prefix-first for implicit caching: RULES first, then the stable
+# SCENARIO/REFERENCE blocks, variable JUSTIFIED justifications last.
+# ---------------------------------------------------------------------------
+
+P4_BLUE_PREFIX = "user-defined — plausibility check, not doc-cited"
+
+P3_SYSTEM = (
+    "You write Apply-scenarios for a study map. Verbalize ONLY the given "
+    "concepts: never invent, add, drop or swap them; echo the chunk ids "
+    "back exactly. Ground every sentence in the supplied explanations/"
+    "pages/captions (doc scope) — no external knowledge, no page numbers "
+    "printed as citations. Describe the situation in fresh words: do NOT "
+    "print any supplied concept title verbatim in the text. If grounding "
+    "is thin, keep the scenario modest and still doc-grounded. Output one "
+    "compact JSON object only, no pretty printing."
+)
+
+P3_RULES = (
+    'RULES: JSON object only: {"text": string, "concept_ids": [ids]}. '
+    "Echo CHUNK_IDS exactly, unchanged, same order. Verbalize only — never "
+    "invent/add/drop concepts. Never copy a CHUNK_CONCEPTS title into "
+    "text; describe the underlying situation instead. Use only the "
+    "supplied explanation fields (doc scope, no external knowledge). "
+    "2-3 sentences, <= ~420 chars."
+)
+
+P4_SYSTEM = (
+    "You grade Apply-scenario submissions. For EACH justified concept "
+    "decide independently whether its justification correctly explains how "
+    "that concept applies to THIS scenario, grounded in that concept's "
+    "REFERENCE (doc scope) — no external knowledge. passed=true only when "
+    "the justification applies the concept to the scenario's concrete "
+    "facts, not when it merely restates the reference or scenario wording. "
+    "For BLUE-flagged rows the ground is the user's own definition — trust "
+    "it, do not check it against a document, do not cite pages: passed="
+    "true when the justification is consistent with that user text AND "
+    "plausibly applies it to the scenario's facts; fail when it "
+    "contradicts the user's own definition or never touches the scenario. "
+    f"Prefix blue feedback with exactly: {P4_BLUE_PREFIX}. feedback: ONE "
+    "short sentence (~140 chars). On fail, hint is ONE short nudge that "
+    "never states or paraphrases the reference answer; on pass hint must "
+    "be empty. Output one compact JSON object only, no pretty printing: "
+    '{"results":[{"concept_id","passed","feedback","hint"}]} — exactly one '
+    "entry per JUSTIFIED_CONCEPT, same order."
+)
+
+P4_RULES = (
+    'RULES: JSON object only: '
+    '{"results":[{"concept_id","passed","feedback","hint"}]}. One entry per '
+    "JUSTIFIED_CONCEPT, same order, ids unchanged. passed=true only when "
+    "the justification ties the concept's core idea to the scenario's "
+    "concrete facts; a recital of the REFERENCE or scenario wording that "
+    "never applies it to the scenario fails. BLUE rows: the ground is the "
+    "user's own definition — consistency with it and plausible contact "
+    "with the scenario facts is enough; never cite pages; feedback must "
+    f"start with '{P4_BLUE_PREFIX}'. feedback ONE short sentence (~140 "
+    "chars). hint empty on pass; on fail ONE nudge that never states or "
+    "paraphrases the reference answer. Ground only in SCENARIO + REFERENCE."
+)
+
+
+def _lane_line(concept: dict, concept_id: str) -> str:
+    """One grounded P3/P4 REFERENCE lane from a server-resolved store row.
+
+    Store rows carry parsed lists for pages (store.list_concepts json-decodes
+    them), so values are normalised defensively in case a raw row slips in.
+    """
+    c = concept or {}
+    pages = c.get("pages")
+    if isinstance(pages, str):
+        try:
+            pages = json.loads(pages)
+        except Exception:
+            pages = []
+    return (
+        f"- {concept_id} | {_clip(c.get('title'), 300)} | "
+        f"{_clip(c.get('explanation_type') or 'definition', 80)} | "
+        f"pages {_clip(json.dumps(pages or []), 120)} | "
+        f"{_clip(c.get('explanation_text'), 1000)} | "
+        f"{_clip(c.get('diagram_description'), 300)}"
+    )
+
+
+def build_p3_user(chunk_ids: list[str], chunk_rows: list[dict] | None = None,
+                  mains_rows: list[dict] | None = None) -> str:
+    """P3 user prompt: RULES, then CHUNK_IDS + the app-owned chunk lanes.
+
+    Grounding (§8): every lane is a server-resolved store row passed by the
+    route (api_l3_generate) — no client text is involved at all. mains_rows
+    (Phase 2) ride along as display-only background; mains are never
+    chunked, never pooled, never in concept_ids (Locks §3+§7).
+    """
+    rows = {str((r or {}).get("id") or ""): r for r in (chunk_rows or [])}
+    lines = [
+        _lane_line(rows.get(cid) or {}, cid) for cid in (chunk_ids or [])
+    ]
+    out = (
+        f"{P3_RULES}\n\n"
+        f"CHUNK_IDS: {json.dumps(list(chunk_ids or []))}\n\n"
+        "CHUNK_CONCEPTS (id | title | type | pages | explanation | diagram):\n"
+        + "\n".join(lines)
+    )
+    if mains_rows:
+        bg = [
+            f"- {_clip(c.get('id'), 60)} | {_clip(c.get('title'), 200)} | "
+            f"{_clip(c.get('explanation_text'), 240)}"
+            for c in list(mains_rows)[:12]
+        ]
+        out += (
+            "\n\nMAINS_BACKGROUND (display-only background; never part of "
+            "concept_ids):\n" + "\n".join(bg)
+        )
+    return out
+
+
+def build_p4_user(scenario_text: str, lanes: list[dict]) -> str:
+    """P4 user prompt for the ONE merged grading call per submit.
+
+    Grounding (§8): `lanes` are built by the caller from server-resolved
+    rows — every lane {concept_id, blue, justification, concept}. The only
+    client text in the whole prompt is each lane's justification. Blue lanes
+    carry the user's own saved explanation as ground (G2'/G8) with a BLUE
+    marker; the model is told not to cite pages for that row.
+    """
+    ref_lines: list[str] = []
+    just_lines: list[str] = []
+    for lane in lanes:
+        cid = str(lane.get("concept_id", ""))
+        c = lane.get("concept") or {}
+        if lane.get("blue"):
+            pages_field = "pages user-defined"
+            blue_note = (
+                " [BLUE: user_added — ground is the USER TEXT, not the doc; "
+                "never cite pages for this row]"
+            )
+            text = _clip(c.get("explanation_text"), 4000)
+        else:
+            pages = c.get("pages")
+            if isinstance(pages, str):
+                try:
+                    pages = json.loads(pages)
+                except Exception:
+                    pages = []
+            pages_field = f"pages {_clip(json.dumps(pages or []), 120)}"
+            blue_note = ""
+            text = _clip(c.get("explanation_text"), 4000)
+        ref_lines.append(
+            f"- {cid} | {_clip(c.get('title'), 300)} | "
+            f"{_clip(c.get('explanation_type') or 'definition', 80)} | "
+            f"{pages_field} | {text} | "
+            f"{_clip(c.get('diagram_description'), 300)}{blue_note}"
+        )
+        just_lines.append(
+            f"- concept_id: {cid} | justification: "
+            f"{_clip(lane.get('justification'), 1200)}"
+        )
+    return (
+        f"{P4_RULES}\n\n"
+        f"SCENARIO:\n{_clip(scenario_text, 1200)}\n\n"
+        "REFERENCE_CONCEPTS (id | title | type | pages | explanation | diagram):\n"
+        + "\n".join(ref_lines)
+        + "\n\nJUSTIFIED_CONCEPTS:\n" + "\n".join(just_lines)
+    )
+
+
+# ---- P3/P4 strict validation (live JSON) ----
+
+def validate_scenario_text_shape(data: object, chunk_ids: list[str]) -> str:
+    """Strict P3 shape check (S3 grill G1; supervisor-demo strictness).
+
+    Must be an object (an optional {"scenario": {...}} wrapper tolerated)
+    with non-empty text and concept_ids that EQUAL the app-owned chunk
+    (same set, same length, no duplicates). Returns the clipped text. The
+    app keeps its own chunk order at store time regardless; the echo check
+    proves the model verbalized the right chunk and invented nothing.
+    Raises ValueError(reason) -> caller advances the chain (never 502).
+    """
+    if not isinstance(data, dict):
+        raise ValueError("live JSON must be an object")
+    inner = data.get("scenario")
+    if isinstance(inner, dict):
+        data = inner
+    text = data.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("missing scenario text")
+    ids = data.get("concept_ids")
+    if not isinstance(ids, list) or not ids:
+        raise ValueError("concept_ids must be a non-empty list")
+    clean = [str(i) for i in ids]
+    if any(not i.strip() for i in clean):
+        raise ValueError("concept_ids entries must be non-empty strings")
+    if len(set(clean)) != len(clean):
+        raise ValueError("duplicate concept id in concept_ids")
+    chunk = [str(i) for i in (chunk_ids or [])]
+    if set(clean) != set(chunk) or len(clean) != len(chunk):
+        raise ValueError("concept_ids must equal the app-owned chunk")
+    return text.strip()[:2000]
+
+
+def _as_bool(value: object) -> bool:
+    """Model verdict coercion: real bool, or true/false-style strings.
+
+    Unknown string verdicts fail closed (safe direction: the student gets a
+    nudge instead of a free pass).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "y", "pass", "passed", "correct"):
+            return True
+        if v in ("false", "0", "no", "n", "fail", "failed"):
+            return False
+    return False
+
+
+_L3_GENERIC_HINT = "Tie your justification to specific scenario facts."
+_L3_MISSING_FEEDBACK_FAIL = (
+    "Explain how this concept applies to the scenario facts."
+)
+_L3_MISSING_FEEDBACK_PASS = (
+    "Applies here — justification supported by the scenario facts."
+)
+
+
+def _coerced_missing_entry(cid: str) -> dict:
+    """Split-stay coercion: a dropped live entry still answers honestly."""
+    return {"concept_id": cid, "passed": False,
+            "feedback": _L3_MISSING_FEEDBACK_FAIL, "hint": _L3_GENERIC_HINT}
+
+
+def validate_eval_results_shape(data: object, lane_ids: list[str],
+                                grounds: dict[str, str] | None = None) -> list[dict]:
+    """Strict P4 shape check + stay-live coercions (S3 grill G3/G6/G8).
+
+    Returns exactly ONE entry per lane id, in lane order. Structural
+    garbage raises ValueError -> the caller advances the chain. Per-entry
+    problems coerce and stay live (a valid read is never thrown away):
+    missing entry -> generic fail + nudge; unknown / duplicated / extra
+    ids dropped; string verdicts coerced; pass forces hint ''; failed
+    missing hint -> one generic nudge; a fail hint that echoes the
+    reference answer is replaced (S2 hint guardrail mirrors here).
+    """
+    if not isinstance(data, dict):
+        raise ValueError("live JSON must be an object")
+    raw = data.get("results")
+    if not isinstance(raw, list):
+        raise ValueError("results must be a list")
+    want = [str(cid) for cid in (lane_ids or [])]
+    by_id: dict[str, dict] = {}
+    for r in raw:
+        if not isinstance(r, dict):
+            continue
+        cid = str(r.get("concept_id") or "").strip()
+        if not cid or cid not in want or cid in by_id:
+            continue  # unknown / extra / duplicated ids dropped
+        by_id[cid] = r
+    out: list[dict] = []
+    for cid in want:
+        r = by_id.get(cid)
+        if r is None:
+            out.append(_coerced_missing_entry(cid))
+            continue
+        passed = _as_bool(r.get("passed"))
+        feedback = r.get("feedback")
+        if not isinstance(feedback, str) or not feedback.strip():
+            feedback = _L3_MISSING_FEEDBACK_PASS if passed else _L3_MISSING_FEEDBACK_FAIL
+        else:
+            feedback = feedback.strip()[:800]
+        hint = r.get("hint")
+        hint = hint.strip()[:300] if isinstance(hint, str) else ""
+        if passed:
+            hint = ""
+        elif not hint:
+            hint = _L3_GENERIC_HINT
+        ref = str((grounds or {}).get(cid) or "").strip()
+        if not passed and len(ref) >= 24 and ref.lower() in hint.lower():
+            # Guardrail (S2 carry): a hint must never be the reference answer.
+            hint = _L3_GENERIC_HINT
+        out.append({"concept_id": cid, "passed": passed,
+                    "feedback": feedback, "hint": hint})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +662,13 @@ GROQ_MAX_TOKENS_EXTRACT = 850    # P1: list (well under any per-minute window)
 # latency benchmark (S2g) — generation cost does not dominate the demo.
 DEEPSEEK_MAX_TOKENS = 200            # P2
 DEEPSEEK_MAX_TOKENS_EXTRACT = 850    # P1
+# S3 (caps grill): two new call shapes join the chain — P3 verbalizes one
+# short scenario OBJECT (~90-130 output tokens; 350 keeps ~2.5x headroom) and
+# P4 grades ONE merged object with <=3 entries after the tier-1/empty/
+# locked pre-filters (feedback ~140 chars each; 450 is comfortable). Same
+# value on both providers (S2h identical pacing).
+GROQ_MAX_TOKENS_SCENARIO = 350   # P3
+GROQ_MAX_TOKENS_EVAL = 450       # P4
 # S2g+ probe (2026-10-23): deepseek-flash thinks by default and the effort
 # knob (low|high|max) does NOT turn that off (effort=low still burned ~209
 # reasoning tokens; reasoning counts inside max_tokens -> empty content and
@@ -371,10 +679,23 @@ DEEPSEEK_MAX_TOKENS_EXTRACT = 850    # P1
 # model with thinking already off server-side.
 DEEPSEEK_THINKING_OFF = {"thinking": {"type": "disabled"}}
 
+_MAX_TOKENS_BY_SHAPE = {
+    "p1": GROQ_MAX_TOKENS_EXTRACT,
+    "p2": GROQ_MAX_TOKENS,
+    "p3": GROQ_MAX_TOKENS_SCENARIO,
+    "p4": GROQ_MAX_TOKENS_EVAL,
+}
 
-def _max_tokens(extract: bool = False) -> int:
-    """Output cap by call shape (S2h: identical pacing on both providers)."""
-    return GROQ_MAX_TOKENS_EXTRACT if extract else GROQ_MAX_TOKENS
+
+def _max_tokens(extract: bool = False, shape: str | None = None) -> int:
+    """Output cap by call shape (S2h: identical pacing on both providers).
+
+    `shape` ("p1".."p4") wins when given — the S3 slices use it. The legacy
+    boolean keeps the S2 behaviour for existing callers/tests.
+    """
+    if shape:
+        return _MAX_TOKENS_BY_SHAPE.get(shape, GROQ_MAX_TOKENS)
+    return _MAX_TOKENS_BY_SHAPE["p1"] if extract else _MAX_TOKENS_BY_SHAPE["p2"]
 
 
 def _openai_compatible_generate(
@@ -529,7 +850,7 @@ def extract_concepts_with_status(
             raw = _llm_generate(
                 model, P1_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S,
                 json_mode=False,  # P1 wants a top-level list, not object mode
-                max_tokens=_max_tokens(extract=True),  # shape-paced caps
+                max_tokens=_max_tokens(shape="p1"),  # shape-paced caps
             )
             cleaned = _strip_code_fences(raw)
             try:
@@ -827,7 +1148,9 @@ def evaluate_paraphrase(session_id: str, concept_id: str, paraphrase: str,
 # 3. generate_scenario(chunk_ids, context_markdown) -> {scenario_id, text, concept_ids}
 # Locks §3+§8: app owns partition, passes exact chunk; LLM verbalizes only.
 # (No session scoping needed — chunk + background context are app-supplied.)
-def generate_scenario(chunk_ids: list[str], context_markdown: str = "") -> dict:
+
+def _generate_scenario_stub(chunk_ids: list[str], context_markdown: str = "") -> dict:
+    """Frozen stub behaviour (keyless + fallback): chunk ids preserved."""
     _ = context_markdown
     pick = list(chunk_ids or [])[:3]  # cap 3; 2+2 remainder + n=1 exception handled by caller
     return {
@@ -837,30 +1160,123 @@ def generate_scenario(chunk_ids: list[str], context_markdown: str = "") -> dict:
     }
 
 
+def generate_scenario_with_status(
+    chunk_ids: list[str],
+    context_markdown: str = "",
+    chunk_rows: list[dict] | None = None,
+    mains_rows: list[dict] | None = None,
+) -> dict:
+    """S3 live chain + labelled fallback (additive, never raises for I/O).
+
+    Returns {scenario: {scenario_id, text, concept_ids},
+             mode: live|stub, model, fallback_reason}.
+    App owns the partition (Locks §3+§8): the chunk is app-supplied and the
+    live model may only verbalize text for it — validate_scenario_text_shape
+    demands an id echo that equals the chunk, else the chain advances and
+    the labelled stub answers (never 502). Chain: mixed LLM_MODELS routed BY
+    MODEL ID (S2h free-first: qwen -> deepseek-flash), one attempt per link;
+    unkeyed links are skipped and noted in fallback_reason without burning
+    an attempt. Keys never logged.
+    """
+    pick = list(chunk_ids or [])[:3]  # cap 3; caller gates 1-3 (store.create_scenario)
+    _ = context_markdown  # frozen param; structured rows carry the live ground
+    if not config.is_llm_live():
+        scn = _generate_scenario_stub(chunk_ids, context_markdown)
+        reason = "stub-default (no key on any chain link)"
+        log.info("l3 generate: mode=stub reason=%s", reason)
+        return {"scenario": scn, "mode": "stub", "model": "stub",
+                "fallback_reason": reason}
+
+    user_prompt = build_p3_user(pick, chunk_rows, mains_rows)
+    last_reason = ""
+    skipped: list[str] = []
+    for model in config.get_llm_models():
+        api_key = config.get_llm_key(model)  # per-link key (never logged)
+        if not api_key:
+            skipped.append(model)
+            log.info("l3 generate: %s: skipped (provider key absent)", model)
+            continue
+        try:
+            log.info("l3 generate: trying live model=%s chunk=%s", model, pick)
+            raw = _llm_generate(
+                model, P3_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S,
+                json_mode=True,  # object output (P3 is an object, not a list)
+                max_tokens=_max_tokens(shape="p3"),
+            )
+            data = json.loads(_strip_code_fences(raw))
+            text = validate_scenario_text_shape(data, pick)
+            log.info("l3 generate: live ok model=%s chars=%d", model, len(text))
+            return {
+                "scenario": {"scenario_id": "", "text": text,
+                             "concept_ids": list(pick)},
+                "mode": "live", "model": model, "fallback_reason": "",
+            }
+        except Exception as e:
+            # 429/5xx/network/auth/bad-JSON/shape-fail — advance the chain.
+            last_reason = f"{model}: {type(e).__name__}: {str(e)[:200]}"
+            log.warning("l3 generate: %s", last_reason)
+            continue
+    scn = _generate_scenario_stub(chunk_ids, context_markdown)
+    reason = last_reason or "all live models failed — stub fallback"
+    if skipped:
+        reason += f" [+ unkeyed links skipped: {', '.join(skipped)}]"
+    log.warning("l3 generate: mode=stub reason=%s", reason)
+    return {"scenario": scn, "mode": "stub", "model": "stub",
+            "fallback_reason": reason}
+
+
+def generate_scenario(chunk_ids: list[str], context_markdown: str = "") -> dict:
+    """Frozen §8 signature: returns the scenario dict only (labelling
+    out-of-band via generate_scenario_with_status).
+
+    App owns the partition: the model's verbalized text is stored against
+    the APP's chunk ids (the untouched store.create_scenario gate), so a
+    misbehaving echo can never corrupt the ceil(n/3) math.
+    """
+    return generate_scenario_with_status(chunk_ids, context_markdown)["scenario"]
+
+
 # 4. evaluate_scenario(session_id, scenario_id, selections)
 #    -> {results, missed_ids, scenario_cleared} (Locks §3 tier 4 + §8)
-def evaluate_scenario(
-    session_id: str,
-    scenario_id: str,
-    selections: list[dict] | None = None,
-    user_id: int | None = None,
-) -> dict:
-    """Stub (Locks §8): resolves scenario + concepts server-side by owned ids.
 
-    Ownership (§0+§8): when user_id is given, verifies sessions.user_id ==
-    user_id first. Raw client-supplied required sets are NEVER trusted —
-    `required` always resolves from the owned scenario row (legacy
-    scenario_concept_ids param removed per §8 MUST NOT trust raw client
-    text). results = one entry per submitted selection (tier 1:
-    selected-but-not-required fails as "not related"); missed_ids =
-    required-but-unselected; cleared = missed empty AND no wrong picks AND
-    every required selected+passed. Blue-involved selections resolve user
-    text as ground with plausibility feedback. Lock-passed inputs are
-    excluded by the caller (main keeps the locked set); the caller's strict
-    clear additionally requires locked coverage — see main.api_l3_submit.
+# Rule-based lane copies for the LIVE path (honest wording — no
+# "(stub-grounded)" tag; that tag stays reserved for the frozen stub engine,
+# whose mode=stub label makes it truthful). Tier-1 copy matches the stub.
+
+def _tier1_entry(cid: str) -> dict:
+    return {"concept_id": cid, "passed": False,
+            "feedback": f"Concept {cid} is not related to this scenario.",
+            "hint": "Uncheck it, or replace with a concept the scenario facts support."}
+
+
+def _empty_just_entry(cid: str, blue: bool) -> dict:
+    if blue:
+        return {"concept_id": cid, "passed": False,
+                "feedback": "Justify how your concept applies to the scenario.",
+                "hint": _L3_GENERIC_HINT}
+    return {"concept_id": cid, "passed": False,
+            "feedback": _L3_MISSING_FEEDBACK_FAIL, "hint": _L3_GENERIC_HINT}
+
+
+def _stub_lane_entry(cid: str, blue: bool) -> dict:
+    """Lenient stub copy for a live lane when the whole chain failed."""
+    if blue:
+        return {"concept_id": cid, "passed": True,
+                "feedback": "user-defined — plausibility check, not doc-cited.",
+                "hint": ""}
+    return {"concept_id": cid, "passed": True,
+            "feedback": _L3_MISSING_FEEDBACK_PASS + " (stub-grounded).",
+            "hint": ""}
+
+
+def _evaluate_scenario_stub(session_id: str, scenario_id: str,
+                            selections: list[dict] | None = None) -> dict:
+    """Frozen stub behaviour (keyless + fallback), byte-identical output.
+
+    Keyless full-run seed clears still land; keyless CI stays green; copies
+    keep the historical stub-grounded wording (their mode=stub label makes
+    it truthful).
     """
-    if user_id is not None:
-        store.require_owned_session(session_id, user_id)
     rows = {x["id"]: x for x in store.list_scenarios(session_id)}
     scn = rows.get((scenario_id or "").strip())
     if not scn:
@@ -917,6 +1333,170 @@ def evaluate_scenario(
     wrong = any(r["concept_id"] not in required for r in results)
     cleared = (not missed) and (not wrong) and required_ok and bool(required)
     return {"results": results, "missed_ids": missed, "scenario_cleared": cleared}
+
+
+def evaluate_scenario_with_status(
+    session_id: str,
+    scenario_id: str,
+    selections: list[dict] | None = None,
+    user_id: int | None = None,
+) -> dict:
+    """S3 live chain + labelled fallback (additive, never raises for live I/O).
+
+    ONE merged P4 call per submit (the S2e+ rate-limit guardrail; the §8
+    signature guarantees the merge). Pre-chain rule-based layers per
+    selection: tier-1 wrong picks (selected-but-not-required -> "not
+    related", retries never re-spend tokens), empty justifications (never
+    sent, G7), locked passes (excluded by the caller). Blue user_added
+    selections JOIN the call (G2'/G8, amending the S2h no-LLM carry): the
+    lane's ground is the user's own saved explanation, graded leniently for
+    consistency with it + plausible contact with the scenario facts, the
+    "user-defined — plausibility check, not doc-cited" prefix enforced
+    app-side, no page citations. Only extraction-grounded required
+    selections reach the model.
+
+    Returns {evaluation: {results, missed_ids, scenario_cleared},
+             mode: live|stub|rules, model, fallback_reason}.
+    mode=rules labels a submit that needed zero model calls (G4). Keyless ->
+    frozen stub engine; a valid live fail stays live (never silently
+    swapped); strict clear math stays app-side (missed empty AND no wrong
+    picks AND every required selection passed); lock-aware locked coverage
+    is the caller's concern (main.api_l3_submit).
+    """
+    if user_id is not None:
+        store.require_owned_session(session_id, user_id)
+    rows = {x["id"]: x for x in store.list_scenarios(session_id)}
+    scn = rows.get((scenario_id or "").strip())
+    if not scn:
+        raise KeyError("unknown scenario for this session")
+    required = list(scn.get("concept_ids") or [])
+    concepts = {c["id"]: c for c in store.list_concepts(session_id)}
+    sels = selections or []
+
+    if not config.is_llm_live():
+        evaluation = _evaluate_scenario_stub(session_id, scenario_id, sels)
+        reason = "stub-default (no key on any chain link)"
+        log.info("l3 submit: mode=stub reason=%s", reason)
+        return {"evaluation": evaluation, "mode": "stub", "model": "stub",
+                "fallback_reason": reason}
+
+    # Pre-chain lane split (submission order): tier-1 / empty / live lanes.
+    tier1: list[dict] = []
+    empty_lanes: list[dict] = []
+    lanes: list[dict] = []
+    for s in sels:
+        cid = str(s.get("concept_id", "")).strip()
+        just = (s.get("justification") or "").strip()
+        if cid not in required:
+            tier1.append(_tier1_entry(cid))
+            continue
+        c = concepts.get(cid) or {}
+        blue = c.get("source") == "user_added"
+        if not just:
+            empty_lanes.append(_empty_just_entry(cid, blue))
+            continue
+        lanes.append({"concept_id": cid, "blue": blue,
+                      "justification": just, "concept": c})
+
+    def _finish(results: list[dict]) -> dict:
+        got = {str(s.get("concept_id", "")) for s in sels}
+        missed = [c for c in required if c not in got]
+        by_id: dict[str, bool] = {}
+        for r in results:
+            by_id.setdefault(str(r.get("concept_id", "")), bool(r.get("passed")))
+        required_ok = all(by_id.get(cid, False) for cid in required)
+        wrong = any(str(r.get("concept_id", "")) not in required for r in results)
+        cleared = (not missed) and (not wrong) and required_ok and bool(required)
+        return {"results": results, "missed_ids": missed, "scenario_cleared": cleared}
+
+    def _ordered(entries: list[dict]) -> list[dict]:
+        # Submission order, mirroring the frozen stub shape (UI maps by id).
+        by_cid: dict[str, dict] = {}
+        for e in entries:
+            by_cid.setdefault(str(e.get("concept_id", "")), e)
+        return [by_cid[str(s.get("concept_id", ""))] for s in sels]
+
+    if not lanes:
+        log.info("l3 submit: mode=rules (no LLM-graded selections)")
+        entries = tier1 + empty_lanes
+        return {"evaluation": _finish(_ordered(entries)), "mode": "rules",
+                "model": "rules", "fallback_reason": ""}
+
+    grounds = {l["concept_id"]: str((l["concept"] or {}).get("explanation_text") or "")
+               for l in lanes}
+    blue_ids = {l["concept_id"] for l in lanes if l["blue"]}
+    lane_ids = [l["concept_id"] for l in lanes]
+    user_prompt = build_p4_user(str(scn.get("text") or ""), lanes)
+    last_reason = ""
+    skipped: list[str] = []
+    for model in config.get_llm_models():
+        api_key = config.get_llm_key(model)  # per-link key (never logged)
+        if not api_key:
+            skipped.append(model)
+            log.info("l3 submit: %s: skipped (provider key absent)", model)
+            continue
+        try:
+            log.info("l3 submit: trying live model=%s lanes=%s",
+                     model, sorted(lane_ids))
+            raw = _llm_generate(
+                model, P4_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S,
+                json_mode=True, max_tokens=_max_tokens(shape="p4"),
+            )
+            data = json.loads(_strip_code_fences(raw))
+            lane_results = validate_eval_results_shape(data, lane_ids, grounds)
+            for r in lane_results:
+                if (r["concept_id"] in blue_ids
+                        and not r["feedback"].startswith(P4_BLUE_PREFIX)):
+                    r["feedback"] = f"{P4_BLUE_PREFIX} {r['feedback']}"[:900]
+                    log.info("l3 submit: blue prefix enforced (%s)",
+                             r["concept_id"])
+            log.info("l3 submit: live ok model=%s passed=%s",
+                     model, [r["passed"] for r in lane_results])
+            entries = tier1 + empty_lanes + lane_results
+            return {"evaluation": _finish(_ordered(entries)), "mode": "live",
+                    "model": model, "fallback_reason": ""}
+        except Exception as e:
+            # 429/5xx/network/auth/bad-JSON/shape-fail — advance the chain.
+            last_reason = f"{model}: {type(e).__name__}: {str(e)[:200]}"
+            log.warning("l3 submit: %s", last_reason)
+            continue
+
+    # Whole chain dead: lenient stub lanes (the pre-agreed demo-safety trade;
+    # a VALID LIVE FAIL above always stays live). Labelled, never 502.
+    lane_results = [_stub_lane_entry(l["concept_id"], l["blue"]) for l in lanes]
+    entries = tier1 + empty_lanes + lane_results
+    reason = last_reason or "all live models failed — stub fallback"
+    if skipped:
+        reason += f" [+ unkeyed links skipped: {', '.join(skipped)}]"
+    log.warning("l3 submit: mode=stub reason=%s", reason)
+    return {"evaluation": _finish(_ordered(entries)), "mode": "stub",
+            "model": "stub", "fallback_reason": reason}
+
+
+def evaluate_scenario(
+    session_id: str,
+    scenario_id: str,
+    selections: list[dict] | None = None,
+    user_id: int | None = None,
+) -> dict:
+    """Frozen §8 signature: returns the evaluation dict only.
+
+    Ownership (§0+§8): when user_id is given, verifies sessions.user_id ==
+    user_id first. Raw client-supplied required sets are NEVER trusted —
+    `required` always resolves from the owned scenario row (legacy
+    scenario_concept_ids param removed per §8 MUST NOT trust raw client
+    text). results = one entry per submitted selection (tier 1 flagged
+    rule-based); missed_ids = required-but-unselected; cleared = missed
+    empty AND no wrong picks AND every required selected+passed. Blue
+    selections grade against the user's own saved text (G2'). Lock-passed
+    inputs are excluded by the caller (main keeps the locked set); the
+    caller's strict clear additionally requires locked coverage — see
+    main.api_l3_submit. Routes need mode/model/warning:
+    evaluate_scenario_with_status.
+    """
+    return evaluate_scenario_with_status(
+        session_id, scenario_id, selections, user_id=user_id
+    )["evaluation"]
 
 
 # 5. probe_link(session_id, link_id, why_answer, fail_answer) -> 6-field
