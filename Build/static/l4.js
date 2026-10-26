@@ -1042,14 +1042,22 @@
     }
     if (!etype) { el('edgeMsg').textContent = 'Pick a type or write custom'; return; }
     try {
-      await api('/api/sessions/' + SID + '/l4/links' + q(), { method: 'POST',
+      const j = await api('/api/sessions/' + SID + '/l4/links' + q(), { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ from_id: pendingFrom, to_id: pendingTo, edge_type: etype, is_preset }) });
       el('edgePanel').classList.add('hidden');
       pendingFrom = pendingTo = null;
       try { window.__cognimap_l4_pending = false; } catch (_e) { /* ignore */ }
-      refresh();
+      await refresh();
       if (window.CogniMapL5) CogniMapL5.refresh();
+      // G-S4-1: a Phase-2 main soft-exempt (sub side fine, main over 3) keeps
+      // its create_link notice — surface it on the status line after the
+      // repaint so it survives the refresh overwrite. Additive only.
+      const notice = (j && typeof j.notice === 'string') ? j.notice : '';
+      if (notice) {
+        const ls = el('l4status');
+        if (ls) ls.textContent = ls.textContent + ' · ' + notice;
+      }
     } catch (err) { el('edgeMsg').textContent = err.message; }
   }
 

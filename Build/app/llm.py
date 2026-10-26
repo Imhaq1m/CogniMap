@@ -669,6 +669,8 @@ DEEPSEEK_MAX_TOKENS_EXTRACT = 850    # P1
 # value on both providers (S2h identical pacing).
 GROQ_MAX_TOKENS_SCENARIO = 350   # P3
 GROQ_MAX_TOKENS_EVAL = 450       # P4
+GROQ_MAX_TOKENS_PROBE = 400      # P5 (S5-G4: two verdicts + two short
+                                 # feedbacks + two hints in one JSON object)
 # S2g+ probe (2026-10-23): deepseek-flash thinks by default and the effort
 # knob (low|high|max) does NOT turn that off (effort=low still burned ~209
 # reasoning tokens; reasoning counts inside max_tokens -> empty content and
@@ -684,14 +686,15 @@ _MAX_TOKENS_BY_SHAPE = {
     "p2": GROQ_MAX_TOKENS,
     "p3": GROQ_MAX_TOKENS_SCENARIO,
     "p4": GROQ_MAX_TOKENS_EVAL,
+    "p5": GROQ_MAX_TOKENS_PROBE,
 }
 
 
 def _max_tokens(extract: bool = False, shape: str | None = None) -> int:
     """Output cap by call shape (S2h: identical pacing on both providers).
 
-    `shape` ("p1".."p4") wins when given — the S3 slices use it. The legacy
-    boolean keeps the S2 behaviour for existing callers/tests.
+    `shape` ("p1".."p5") wins when given — the S3/S5 slices use it. The
+    legacy boolean keeps the S2 behaviour for existing callers/tests.
     """
     if shape:
         return _MAX_TOKENS_BY_SHAPE.get(shape, GROQ_MAX_TOKENS)
@@ -1499,25 +1502,22 @@ def evaluate_scenario(
     )["evaluation"]
 
 
-# 5. probe_link(session_id, link_id, why_answer, fail_answer) -> 6-field
-#    (Locks §5+§8+§9: per-side feedback+hints)
-def probe_link(
-    session_id: str,
-    link_id: str,
-    why_answer: str = "",
-    fail_answer: str = "",
-    user_id: int | None = None,
-) -> dict:
-    """Stub (Locks §8): resolves the edge + endpoint explanations by owned ids.
+# ---------------------------------------------------------------------------
+# S5 P5 probe_link (grill ledger S5-G1..G7, model-agnostic JSON-only).
+# Stable-prefix-first for implicit caching: RULES first (stable), then the
+# stable EDGE/ENDPOINT blocks, variable GRADED_SIDES + ANSWERS last.
+# ---------------------------------------------------------------------------
 
-    Ownership (§0+§8): when user_id is given, verifies sessions.user_id ==
-    user_id first. Raw client-supplied edge dicts are NEVER trusted (legacy
-    link param removed) — edge always resolves from the owned links table.
-    Blue-involved links (either endpoint source=user_added) resolve the
-    user-supplied text as ground with plausibility feedback, never doc-cited.
+def _probe_link_stub(session_id: str, link_id: str, why_answer: str,
+                     fail_answer: str) -> dict:
+    """Frozen stub core (keyless + fallback), byte-identical output.
+
+    (Locks §8): resolves the edge + endpoint explanations by owned ids.
+    Raw client-supplied edge dicts are NEVER trusted — the edge always
+    resolves from the owned links table. Blue-involved links (either
+    endpoint source=user_added) resolve the user-supplied text as ground
+    with plausibility feedback, never doc-cited.
     """
-    if user_id is not None:
-        store.require_owned_session(session_id, user_id)
     links = {x["id"]: x for x in store.list_links(session_id)}
     edge = links.get((link_id or "").strip())
     if not edge:
@@ -1526,7 +1526,7 @@ def probe_link(
     a = concepts.get(edge.get("a_id", "")) or {}
     b = concepts.get(edge.get("b_id", "")) or {}
     blue = a.get("source") == "user_added" or b.get("source") == "user_added"
-    tag = "user-defined — plausibility check, not doc-cited. " if blue else ""
+    tag = f"{P4_BLUE_PREFIX}. " if blue else ""
     why_ok = bool((why_answer or "").strip())
     fail_ok = bool((fail_answer or "").strip())
     # m2 (Details L5 §3): plausible per-side copy, still stub-grounded;
@@ -1541,3 +1541,365 @@ def probe_link(
         if fail_ok else f"{tag}Name a condition where the link breaks (stub-grounded).",
         "fail_hint": "" if fail_ok else "Give a concrete case where the relationship fails (stub-grounded hint).",
     }
+
+
+P5_SYSTEM = (
+    "You probe defended links between two concepts. For EACH graded side "
+    "decide independently whether that answer holds, using only the "
+    "supplied endpoint explanations under the given EDGE relationship "
+    "(doc scope) — no external knowledge. why_passed=true only when the "
+    "answer names what must be true for the link to hold; fail_passed=true "
+    "only when the answer names a concrete condition where the link "
+    "breaks. An answer that merely restates the EDGE wording or an "
+    "endpoint explanation without actually probing it fails. For "
+    "BLUE-flagged endpoints the ground is the user's own definition — "
+    "trust it, do not check it against a document, do not cite pages: "
+    "pass when the answer is consistent with that user text AND plausibly "
+    "engages the relation; fail when it contradicts the user's own "
+    "definition or never touches the question. Prefix blue feedback with "
+    f"exactly: {P4_BLUE_PREFIX}. Each feedback: ONE short sentence (~140 "
+    "chars). On fail, hint is ONE short nudge that never states or "
+    "paraphrases the expected answer; on pass hint must be empty. Same "
+    "treatment for every edge type (custom labels included). Grade ONLY "
+    "the sides listed in GRADED_SIDES. Output one compact JSON object "
+    "only, no pretty printing."
+)
+
+P5_RULES = (
+    'RULES: JSON object only: {"why_passed","why_feedback","why_hint",'
+    '"fail_passed","fail_feedback","fail_hint"} — but include ONLY the '
+    "keys for the sides listed in GRADED_SIDES (all six when both are "
+    'graded; three - one triad per listed side). Grade each graded side '
+    "independently on its own content: why = what must be true for the "
+    "link; fail = a concrete condition where the link breaks. A recital "
+    "of the EDGE wording or an endpoint explanation that never probes the "
+    "relationship fails. BLUE endpoints: the ground is the user's own "
+    "definition — consistency with it and plausible engagement is enough; "
+    "never cite pages; feedback must start with '"
+    f"{P4_BLUE_PREFIX}'. feedback ONE short (~140 chars) sentence per "
+    "side. hint empty on pass; on fail ONE nudge that never states or "
+    "paraphrases the expected answer. Same prompts for custom edges."
+)
+
+
+def _probe_lane(concept: dict, concept_id: str) -> str:
+    """One grounded P5 endpoint lane (mirrors the P4 REFERENCE lane)."""
+    c = concept or {}
+    blue = (c.get("source") or "") == "user_added"
+    if blue:
+        pages_field = "pages user-defined"
+        blue_note = (" [BLUE: user_added — ground is the USER TEXT, not "
+                     "the doc; never cite pages]")
+        text = _clip(c.get("explanation_text"), 4000)
+    else:
+        pages = c.get("pages")
+        if isinstance(pages, str):
+            try:
+                pages = json.loads(pages)
+            except Exception:
+                pages = []
+        pages_field = f"pages {_clip(json.dumps(pages or []), 120)}"
+        blue_note = ""
+        text = _clip(c.get("explanation_text"), 4000)
+    return (
+        f"- {concept_id} | {_clip(c.get('title'), 300)} | "
+        f"{_clip(c.get('explanation_type') or 'definition', 80)} | "
+        f"{pages_field} | {text} | "
+        f"{_clip(c.get('diagram_description'), 300)}{blue_note}"
+    )
+
+
+def build_p5_user(edge: dict, a_row: dict | None, b_row: dict | None,
+                  sides: list[str], why_answer: str = "",
+                  fail_answer: str = "") -> str:
+    """P5 user prompt: RULES, then the owned EDGE + endpoint lanes.
+
+    Grounding (§8): the edge + both concept rows are server-resolved store
+    rows — the only client text in the whole prompt is the two answers.
+    `sides` lists the sides graded THIS call (S5-G2: a lock-passed side is
+    excluded by the caller and never re-graded). Empty answers never ride
+    the call (S3 G7 carry: they pre-filter to rule-based fails).
+    """
+    a_id = str((edge or {}).get("a_id", ""))
+    b_id = str((edge or {}).get("b_id", ""))
+    etype = str((edge or {}).get("edge_type", ""))
+    answer_lines = []
+    if "why" in sides:
+        answer_lines.append(f"- why: {_clip(why_answer, 2000)}")
+    if "fail" in sides:
+        answer_lines.append(f"- fail: {_clip(fail_answer, 2000)}")
+    return (
+        f"{P5_RULES}\n\n"
+        f"EDGE: {a_id} -{_clip(etype, 40)}-> {b_id}\n\n"
+        "ENDPOINT_CONCEPTS (id | title | type | pages | explanation | "
+        "diagram):\n"
+        f"{_probe_lane(a_row, a_id)}\n{_probe_lane(b_row, b_id)}\n\n"
+        f"GRADED_SIDES: {json.dumps(list(sides or []))}\n\n"
+        "ANSWERS (grade only these):\n" + "\n".join(answer_lines)
+    )
+
+
+# ---- P5 strict validation (live JSON) + merged six-field assembly ----
+
+_L5_MISSING_FEEDBACK_PASS = "Probed — the answer holds for this link."
+_L5_MISSING_FEEDBACK_WHY = "State what must be true for this link to hold."
+_L5_MISSING_FEEDBACK_FAIL = "Name a condition where this link breaks."
+_L5_GENERIC_HINT_WHY = "Name the mechanism that makes the link hold."
+_L5_GENERIC_HINT_FAIL = "Give a concrete case where the link breaks."
+P5_LOCKED_FEEDBACK = "Locked green from earlier pass."
+
+
+def _probe_locked_entry() -> dict:
+    """Frozen pass for a side that is already lock-passed (S5-G2)."""
+    return {"passed": True, "feedback": P5_LOCKED_FEEDBACK, "hint": ""}
+
+
+def _probe_rule_fail(side: str) -> dict:
+    """Honest live rule copy for a side graded app-side (S3 G7 mirror)."""
+    if side == "why":
+        return {"passed": False, "feedback": _L5_MISSING_FEEDBACK_WHY,
+                "hint": _L5_GENERIC_HINT_WHY}
+    return {"passed": False, "feedback": _L5_MISSING_FEEDBACK_FAIL,
+            "hint": _L5_GENERIC_HINT_FAIL}
+
+
+def _probe_stub_entry(side: str, blue: bool) -> dict:
+    """Lenient chain-dead stub lane (old frozen stub wording, truthful
+    under the mode=stub label)."""
+    tag = f"{P4_BLUE_PREFIX}. " if blue else ""
+    if side == "why":
+        return {"passed": True,
+                "feedback": f"{tag}Holds — explains what must be true for "
+                            "this link (stub-grounded).",
+                "hint": ""}
+    return {"passed": True,
+            "feedback": f"{tag}Boundary named — says when the link breaks "
+                        "(stub-grounded).",
+            "hint": ""}
+
+
+def validate_probe_eval_shape(data: object, sides: list[str],
+                              grounds: dict[str, str] | None = None) -> dict:
+    """Strict P5 shape check + stay-live coercions (S5 grill G3).
+
+    For EVERY side in `sides`, the boolean verdict key (`side_passed`)
+    must exist — a missing verdict is structural garbage and raises
+    ValueError -> the caller advances the chain (never 502). Everything
+    else coerces and stays live (a valid read is never thrown away):
+    string verdicts fail closed, missing/empty feedback -> the generic
+    side copy, pass forces hint '', failed missing hint -> one generic
+    nudge, and a fail hint that echoes a ground (endpoint explanation /
+    blue user text) is replaced (S2/S3 hint-guardrail carry). Extra keys
+    (including ungraded sides) are tolerated and ignored.
+    Returns {side: {"passed", "feedback", "hint"}} for each graded side.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("live JSON must be an object")
+    inner = data.get("probe")
+    if isinstance(inner, dict):
+        data = inner
+    out: dict[str, dict] = {}
+    for side in (sides or []):
+        if side not in ("why", "fail"):
+            continue
+        key = f"{side}_passed"
+        if key not in data:
+            raise ValueError(f"missing {key} verdict")
+        passed = _as_bool(data.get(key))
+        fb = data.get(f"{side}_feedback")
+        if not isinstance(fb, str) or not fb.strip():
+            fb = (_L5_MISSING_FEEDBACK_PASS if passed
+                  else (_L5_MISSING_FEEDBACK_WHY if side == "why"
+                        else _L5_MISSING_FEEDBACK_FAIL))
+        else:
+            fb = fb.strip()[:800]
+        hint = data.get(f"{side}_hint")
+        hint = hint.strip()[:300] if isinstance(hint, str) else ""
+        if passed:
+            hint = ""
+        elif not hint:
+            hint = (_L5_GENERIC_HINT_WHY if side == "why"
+                    else _L5_GENERIC_HINT_FAIL)
+        ref = str((grounds or {}).get(side) or "").strip()
+        if not passed and len(ref) >= 24 and ref.lower() in hint.lower():
+            # Guardrail (S2/S3 carry): a hint must never be the ground text.
+            hint = (_L5_GENERIC_HINT_WHY if side == "why"
+                    else _L5_GENERIC_HINT_FAIL)
+        out[side] = {"passed": passed, "feedback": fb, "hint": hint}
+    if not out:
+        raise ValueError("no graded sides in live JSON")
+    return out
+
+
+def _merge_probe_eval(why_locked: bool, fail_locked: bool,
+                      graded_eval: dict[str, dict] | None = None,
+                      rule_fails: dict[str, dict] | None = None) -> dict:
+    """Assemble the frozen six-field evaluation (Locks §5+§8).
+
+    Side order is fixed (why then fail); a lock-passed side is a frozen
+    pass; rule-fail sides never rode the call; live sides come from the
+    validated model output. probe_submit's OR math keeps a locked side
+    safe regardless — this shape just never contradicts the lock (S5-G2).
+    """
+    rule_fails = rule_fails or {}
+    evaluation: dict = {}
+    for side in ("why", "fail"):
+        locked = why_locked if side == "why" else fail_locked
+        if locked:
+            entry = _probe_locked_entry()
+        elif side in rule_fails:
+            entry = rule_fails[side]
+        else:
+            e = (graded_eval or {}).get(side)
+            if e is None:
+                raise KeyError(f"missing graded side {side}")
+            entry = {"passed": bool(e.get("passed")),
+                     "feedback": str(e.get("feedback") or ""),
+                     "hint": str(e.get("hint") or "")}
+        evaluation[f"{side}_passed"] = bool(entry["passed"])
+        evaluation[f"{side}_feedback"] = str(entry["feedback"])
+        evaluation[f"{side}_hint"] = str(entry["hint"])
+    return evaluation
+
+
+def probe_link_with_status(
+    session_id: str,
+    link_id: str,
+    why_answer: str = "",
+    fail_answer: str = "",
+    user_id: int | None = None,
+) -> dict:
+    """S5 live chain + labelled fallback (additive, never raises for live I/O).
+
+    ONE P5 call per probe attempt — Why + Fail ride together in the §8
+    signature; no batching across links (one click, one call, well inside
+    the free-plan window). Pre-call lane split: a lock-passed side is
+    NEVER re-graded — it is excluded from the prompt and returns a frozen
+    pass (S5-G2); both sides locked -> zero model calls, mode=rules
+    (S5-G7a, the S3 G4 mirror); empty/whitespace answers pre-filter to
+    rule-based fails and never ride the call (S3 G7 carry).
+
+    Blue-involved links JOIN the call (S5-G1, amending G2''s L5 freeze the
+    same way G2'/G8 amended S3): the endpoint ground is the user's own
+    saved explanation, graded leniently for consistency with it, the
+    "user-defined — plausibility check, not doc-cited" prefix enforced
+    app-side exactly once, never doc-cited. Custom links ride the same
+    prompts (Locks §5).
+
+    Returns {evaluation: <six-field>, mode: live|stub|rules, model,
+    fallback_reason}. Keyless -> frozen stub engine; a valid live fail
+    stays live (never silently swapped); brighten math stays store's
+    probe_submit (both-green only) — untouched. Chain: mixed LLM_MODELS
+    routed BY MODEL ID (S2h free-first), one attempt per link, unkeyed
+    links skipped and noted in fallback_reason without burning an attempt.
+    Keys never logged.
+    """
+    if user_id is not None:
+        store.require_owned_session(session_id, user_id)
+    links = {x["id"]: x for x in store.list_links(session_id)}
+    edge = links.get((link_id or "").strip())
+    if not edge:
+        raise KeyError("unknown link for this session")
+    concepts = {c["id"]: c for c in store.list_concepts(session_id)}
+    a = concepts.get(edge.get("a_id", "")) or {}
+    b = concepts.get(edge.get("b_id", "")) or {}
+    blue = a.get("source") == "user_added" or b.get("source") == "user_added"
+
+    if not config.is_llm_live():
+        evaluation = _probe_link_stub(session_id, link_id, why_answer, fail_answer)
+        reason = "stub-default (no key on any chain link)"
+        log.info("l5 probe: mode=stub reason=%s", reason)
+        return {"evaluation": evaluation, "mode": "stub", "model": "stub",
+                "fallback_reason": reason}
+
+    why_locked = bool(edge.get("why_passed"))
+    fail_locked = bool(edge.get("fail_passed"))
+    # S3 G7 carry + S5-G2: locked sides never ride; empty answers never ride.
+    rule_fails: dict[str, dict] = {}
+    lanes: list[str] = []
+    for side in ("why", "fail"):
+        if (why_locked if side == "why" else fail_locked):
+            continue
+        ans = (why_answer if side == "why" else fail_answer) or ""
+        if not ans.strip():
+            rule_fails[side] = _probe_rule_fail(side)
+            continue
+        lanes.append(side)
+    if not lanes:
+        log.info("l5 probe: mode=rules (no LLM-graded sides)")
+        evaluation = _merge_probe_eval(why_locked, fail_locked, None, rule_fails)
+        return {"evaluation": evaluation, "mode": "rules",
+                "model": "rules", "fallback_reason": ""}
+
+    ref = f"{a.get('explanation_text') or ''}\n{b.get('explanation_text') or ''}"
+    grounds = {"why": ref, "fail": ref}
+    user_prompt = build_p5_user(edge, a, b, lanes, why_answer, fail_answer)
+    last_reason = ""
+    skipped: list[str] = []
+    for model in config.get_llm_models():
+        api_key = config.get_llm_key(model)  # per-link key (never logged)
+        if not api_key:
+            skipped.append(model)
+            log.info("l5 probe: %s: skipped (provider key absent)", model)
+            continue
+        try:
+            log.info("l5 probe: trying live model=%s link=%s sides=%s",
+                     model, edge.get("id"), lanes)
+            raw = _llm_generate(
+                model, P5_SYSTEM, user_prompt, api_key, config.LLM_TIMEOUT_S,
+                json_mode=True, max_tokens=_max_tokens(shape="p5"),
+            )
+            data = json.loads(_strip_code_fences(raw))
+            graded_eval = validate_probe_eval_shape(data, lanes, grounds)
+            if blue:
+                for side in lanes:
+                    fb = graded_eval[side]["feedback"]
+                    if not fb.startswith(P4_BLUE_PREFIX):
+                        graded_eval[side]["feedback"] = (
+                            f"{P4_BLUE_PREFIX} {fb}")[:900]
+                        log.info("l5 probe: blue prefix enforced (%s)", side)
+            log.info("l5 probe: live ok model=%s", model)
+            evaluation = _merge_probe_eval(why_locked, fail_locked,
+                                           graded_eval, rule_fails)
+            return {"evaluation": evaluation, "mode": "live",
+                    "model": model, "fallback_reason": ""}
+        except Exception as e:
+            # 429/5xx/network/auth/bad-JSON/shape-fail — advance the chain.
+            last_reason = f"{model}: {type(e).__name__}: {str(e)[:200]}"
+            log.warning("l5 probe: %s", last_reason)
+            continue
+
+    # Whole chain dead: lenient stub lanes (pre-agreed demo-safety trade;
+    # a VALID LIVE FAIL above always stays live). Labelled, never 502.
+    lane_eval = {s: _probe_stub_entry(s, blue) for s in lanes}
+    reason = last_reason or "all live models failed — stub fallback"
+    if skipped:
+        reason += f" [+ unkeyed links skipped: {', '.join(skipped)}]"
+    log.warning("l5 probe: mode=stub reason=%s", reason)
+    evaluation = _merge_probe_eval(why_locked, fail_locked, lane_eval,
+                                   rule_fails)
+    return {"evaluation": evaluation, "mode": "stub", "model": "stub",
+            "fallback_reason": reason}
+
+
+# 5. probe_link(session_id, link_id, why_answer, fail_answer) -> 6-field
+#    (Locks §5+§8+§9: per-side feedback+hints)
+def probe_link(
+    session_id: str,
+    link_id: str,
+    why_answer: str = "",
+    fail_answer: str = "",
+    user_id: int | None = None,
+) -> dict:
+    """Frozen §8 signature: returns the six-field evaluation only (mode/
+    model/fallback_reason travel out-of-band via probe_link_with_status).
+
+    Ownership (§0+§8): when user_id is given, verifies sessions.user_id ==
+    user_id first. Raw client-supplied edge dicts are NEVER trusted (legacy
+    link param removed) — the edge always resolves from the owned links
+    table. Blue-involved links resolve the user text as ground with
+    plausibility feedback, never doc-cited.
+    """
+    return probe_link_with_status(
+        session_id, link_id, why_answer, fail_answer, user_id=user_id
+    )["evaluation"]

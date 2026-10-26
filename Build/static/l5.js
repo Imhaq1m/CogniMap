@@ -131,9 +131,14 @@
       const j = await api('/api/sessions/' + SID + '/l5/probe' + q(), { method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ link_id: currentLink.id, why_answer: why, fail_answer: fail }) });
-      el('probeWhyFb').innerHTML = `<div class="${j.why_passed ? 'fb-ok' : 'fb-bad'}">${esc(j.why_feedback || '')}</div>` +
+      // S5-G5 banner (additive only, mirrors l3.js): stub mode keeps the
+      // locked L5 flow visible above the per-side feedback.
+      const banner = (j.warning) ? `<div class="warn">${esc(j.warning)}</div>` : '';
+      el('probeWhyFb').innerHTML = banner +
+        `<div class="${j.why_passed ? 'fb-ok' : 'fb-bad'}">${esc(j.why_feedback || '')}</div>` +
         (j.why_hint ? `<div class="fb-hint">Hint: ${esc(j.why_hint)}</div>` : '');
-      el('probeFailFb').innerHTML = `<div class="${j.fail_passed ? 'fb-ok' : 'fb-bad'}">${esc(j.fail_feedback || '')}</div>` +
+      el('probeFailFb').innerHTML =
+        `<div class="${j.fail_passed ? 'fb-ok' : 'fb-bad'}">${esc(j.fail_feedback || '')}</div>` +
         (j.fail_hint ? `<div class="fb-hint">Hint: ${esc(j.fail_hint)}</div>` : '');
       if (j.why_passed) el('probeWhy').disabled = true;
       if (j.fail_passed) el('probeFail').disabled = true;

@@ -1092,11 +1092,22 @@ def api_l5_probe(session_id: str, payload: L5ProbeIn, user_id: int | None = None
     except Exception:
         pass
     try:
-        ev = llm.probe_link(session_id, lid, why, fail, user_id=user_id)
+        # S5 live chain (labelled): ONE P5 call grades only the live lanes
+        # (locked sides / empty answers / both-locked stay rule-based; blue
+        # joins the call per S5-G1).
+        probe = llm.probe_link_with_status(session_id, lid, why, fail,
+                                           user_id=user_id)
     except PermissionError as e:
         raise HTTPException(404, str(e))
     except KeyError as e:
         raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    ev = probe["evaluation"]
+    if probe.get("fallback_reason"):
+        # Server-side only; never log keys (S7).
+        log.warning("l5 probe fallback %s/%s: %s", session_id, lid,
+                    probe.get("fallback_reason"))
     try:
         link = store.probe_submit(session_id, lid, why, fail, ev, user_id=user_id)
     except PermissionError as e:
@@ -1113,8 +1124,14 @@ def api_l5_probe(session_id: str, payload: L5ProbeIn, user_id: int | None = None
             phase2_ready = True
         else:
             store.set_stage(session_id, "done")
-    return {**ev, "link": link, "progress": status, "phase2_ready": phase2_ready,
-            "done": status["complete"] and status["phase"] == "phase2"}
+    out = {**ev, "link": link, "progress": status, "phase2_ready": phase2_ready,
+            "done": status["complete"] and status["phase"] == "phase2",
+            "mode": probe.get("mode") or "stub",
+            "model": probe.get("model") or "stub"}
+    if out["mode"] == "stub":
+        out["warning"] = ("Demo mode (stubbed) — probing grading is "
+                          "lenient and not live.")
+    return out
 
 
 # ---- Step 6 slice: Phase-2 + History (additive) ----
