@@ -1,224 +1,646 @@
-body{margin:0;background:#111;color:#eee;font-family:system-ui,sans-serif}
-a{color:#8ab4ff}
+body{margin:0;background:var(--bg);color:var(--ink);font-size:var(--fs-body);font-family:system-ui,sans-serif}
+a{color:var(--link)}
+/* === Theme system (THEME.md) ===
+   Dark is the DEFAULT (this :root). html[data-theme="light"] overrides the
+   same names at the bottom — every rule below consumes tokens only, so
+   flipping the attribute reskins the whole app (HTML + SVG) with zero JS
+   re-render. Greys that used to be hardcoded per-element (#111, #2b2b2e,
+   #141416, …) are consolidated into one surface ladder.
+   === Motion system (MOTION.md) — smooth & calm =========================
+   Fade + rise, gentle ease-out, no bounce. Exits quicker than entrances.
+   ALL durations/easings/shadows live here as tokens; rules below consume
+   them. prefers-reduced-motion: reduce collapses every duration to ~0
+   (instant), so token transitions need no per-rule wrappers; entrance
+   *animations* still sit inside no-preference blocks (house pattern). */
+:root{
+  --dur-fast:160ms;   /* hover, press, glow, border/focus changes */
+  --dur-base:280ms;   /* modals, drawer, cards, labels, feedback */
+  --dur-slow:420ms;   /* signature moments: level-complete reveals */
+  --dur-exit:200ms;   /* exits (quicker than entrances) */
+  --ease-soft:cubic-bezier(.22,1,.36,1);
+  --ease-exit:cubic-bezier(.4,0,.68,1);
+  --ring:0 0 0 3px rgba(47,111,237,.35);
+  --shadow-card:0 1px 3px rgba(0,0,0,.25);
+  --shadow-float:0 10px 40px rgba(0,0,0,.45),0 2px 10px rgba(0,0,0,.3);
+
+  /* === Type scale (THEME.md): caption/body/title/header/brand + graph === */
+  --fs-caption:12px;  /* labels, tags, badges */
+  --fs-body:14px;     /* base UI: inputs, buttons, drawer, tree rows */
+  --fs-title:16px;    /* card h3, modal h3 */
+  --fs-header:20px;   /* .main h2 page titles */
+  --fs-brand:24px;    /* .brand */
+  --fs-node:13px;     /* SVG graph node + edge labels */
+  /* === 4pt spacing rhythm (THEME.md): --sp-1 4 · --sp-2 8 · --sp-3 12 ·
+     --sp-4 16 · --sp-5 20 · --sp-6 24 (2px exists only as micro-icon
+     inset — documented half-step) ==================================== */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
+
+  /* === Dark surface ladder (page < inset < panel < card < modal) === */
+  --bg:#111;
+  --field:#141416;    /* inputs, canvas base, deepest wells */
+  --inset:#1c1c1f;    /* progress, hist-val, badges */
+  --panel:#1d1d20;    /* drawer */
+  --sidebar:#2b2b2e;
+  --card:#3a3a3e;
+  --softcard:#242428; /* expl box, scenario left, hist cards */
+  --modal:#222;       /* modal boxes + floating popups */
+  --chip:#2e2e33;     /* nodes, row hover, controls */
+  --row:#45454a;      /* file rows */
+  --btn:#4a4a4f;
+  /* ink + lines */
+  --ink:#eee;
+  --muted:#aaa;
+  --icon:#ccc;
+  --line:#555;
+  --line-soft:#444;
+  --line-strong:#6b6b74;
+  /* accents */
+  --link:#8ab4ff;
+  --ube:#2f6fed;      /* user-added blue — RESERVED for user-created concepts */
+  --ube-soft:#12325e;
+  --ube-ink:#bcd6ff;
+  --accent:#2f6fed;
+  --green:#1f9d55;
+  --purple:#6d28d9;
+  --danger:#7f1d1d;
+  --ok:#5fd08a;
+  --bad:#e08a8a;
+  --hint:#c9b98a;
+  --tint-ink:#9fb6dd; /* blue-grey label ink (expl-tag, hist-label) */
+  /* helper fills */
+  --warn-bg:#5a2b2b;
+  --warn-line:#a44848;
+  --lock-bg:#22304a;
+  --lock-line:#2f6fed;
+  --scn-locked:#0f2e1d;
+  --add-line:#e8e8e8;
+  --canvas:#141416;
+  --backdrop:rgba(0,0,0,.55);
+  --backdrop-strong:rgba(0,0,0,.6);
+  --node-bg:#2e2e33;
+  --node-line:#888;
+  --node-active:#fff;             /* dragging ring */
+  --edge-dim:#555;
+  --edge-label-ink:#fff;
+  --edge-select-glow:rgba(255,255,255,.85);
+  /* Edge-type colours: 9 presets stay distinct ("both coexist"). Dark =
+     brightened variants that read on the dark canvas (former label-tone
+     brightness); light = the original saturated hues. */
+  --edge-causes:#e8a0a0;
+  --edge-leads-to:#9dbcff;
+  --edge-depends-on:#7ce3a3;
+  --edge-includes:#fec89b;
+  --edge-contrasts:#f3a3a3;
+  --edge-applied-in:#a9c2f5;
+  --edge-influences:#d3b5fb;
+  --edge-consists:#8fe3bd;
+  --edge-custom:#cbd5e1;
+  --edge-default:#8f96a3;
+  --edge-ghost:#6d90b5;           /* drag-link ghost + its arrowhead */
+  /* Bloom stage accents (THEME.md) — stage chrome memory cues. Step 1
+     shifts to slate because blue is reserved for user-added. */
+  --stage-steps:#94a3b8;
+  --stage-l12:#4ade80;
+  --stage-l3:#c4b5fd;
+  --stage-l4:#fbbf24;
+  --stage-l5:#f87171;
+  --stage-p2:#2dd4bf;
+}
+@media (prefers-reduced-motion: reduce){
+  :root{--dur-fast:1ms;--dur-base:1ms;--dur-slow:1ms;--dur-exit:1ms}
+}
+/* === Light theme: same token names, learning-friendly base = flow-doc
+   off-white #f7f7f2, WCAG-AA body ink. Declared AFTER :root so it wins. */
+html[data-theme="light"]{
+  --ring:0 0 0 3px rgba(29,78,216,.25);
+  --shadow-card:0 1px 3px rgba(15,23,42,.10);
+  --shadow-float:0 10px 40px rgba(15,23,42,.16),0 2px 10px rgba(15,23,42,.08);
+
+  --bg:#f7f7f2;
+  --field:#fff;
+  --inset:#efeff0;
+  --panel:#fff;
+  --sidebar:#eef0f3;
+  --card:#fff;
+  --softcard:#f5f6f8;
+  --modal:#fff;
+  --chip:#eef0f3;
+  --row:#eceef1;
+  --btn:#fff;
+
+  --ink:#1f2126;
+  --muted:#5f6570;
+  --icon:#5f6570;
+  --line:#d3d6db;
+  --line-soft:#e2e4e9;
+  --line-strong:#b9bdc4;
+
+  --link:#1d4ed8;
+  --ube:#1d4ed8;
+  --ube-soft:#dbeafe;
+  --ube-ink:#1e3a8a;
+  --accent:#1d4ed8;
+  --green:#15803d;
+  --danger:#b91c1c;
+  --ok:#15803d;
+  --bad:#b91c1c;
+  --hint:#92400e;
+  --tint-ink:#4a628f;
+
+  --warn-bg:#fdf0f0;
+  --warn-line:#ef9a9a;
+  --lock-bg:#e7f0ff;
+  --lock-line:#1d4ed8;
+  --scn-locked:#e7f6ec;
+  --add-line:#b6bcc6;
+  --canvas:#edeff3;
+  --backdrop:rgba(15,23,42,.42);
+  --backdrop-strong:rgba(15,23,42,.48);
+  --node-bg:#fff;
+  --node-line:#98a0ac;
+  --node-active:#1d4ed8;
+  --edge-dim:#b9bdc4;
+  --edge-select-glow:rgba(29,78,216,.45);
+
+  --edge-causes:#800000;
+  --edge-leads-to:#2563eb;
+  --edge-depends-on:#16a34a;
+  --edge-includes:#f97316;
+  --edge-contrasts:#dc2626;
+  --edge-applied-in:#1e3a8a;
+  --edge-influences:#9333ea;
+  --edge-consists:#166534;
+  --edge-custom:#9ca3af;
+  --edge-default:#94a3b8;
+  --edge-ghost:#5a7fa6;
+
+  --stage-steps:#475569;
+  --stage-l12:#15803d;
+  --stage-l3:#6d28d9;
+  --stage-l4:#b45309;
+  --stage-l5:#b91c1c;
+  --stage-p2:#0f766e;
+}
+/* === Soft overlay system (MOTION.md slice 1) ===========================
+   Every .open-toggled overlay: backdrop fades, box rises + scales in;
+   exits are quicker. visibility lingers through the exit transition so
+   the fade stays visible, then snaps hidden (non-interactive, a11y-safe).
+   Members: #modal #l3modal #l4modal #l5modal #probemodal #phase2modal
+   #donemodal #scnmodal #l12guide #addHeadingModal. The old
+   display:none/.open{display:flex} pairs are gone — this block owns them. */
+#modal,#l3modal,#l4modal,#l5modal,#probemodal,#phase2modal,#donemodal,#scnmodal,#l12guide,#addHeadingModal{
+  display:flex;position:fixed;inset:0;background:var(--backdrop);opacity:0;visibility:hidden;
+  transition:opacity var(--dur-exit) var(--ease-exit),visibility 0s linear var(--dur-exit);
+  align-items:center;justify-content:center}
+#modal.open,#l3modal.open,#l4modal.open,#l5modal.open,#probemodal.open,#phase2modal.open,#donemodal.open,#scnmodal.open,#l12guide.open,#addHeadingModal.open{
+  opacity:1;visibility:visible;transition:opacity var(--dur-base) var(--ease-soft)}
+/* Box rise: parent fades (backdrop + content together), the box itself
+   only rises/scales — double-fading parent+child reads sluggish. */
+#modal .modal-box,#l3modal .modal-box,#l4modal .modal-box,#l5modal .modal-box,#probemodal .modal-box,#phase2modal .modal-box,#donemodal .modal-box,#scnmodal .modal-box,#l12guide .modal-box,#addHeadingModal .modal-box{
+  transform:translateY(14px) scale(.985);
+  transition:transform var(--dur-exit) var(--ease-exit)}
+#modal.open .modal-box,#l3modal.open .modal-box,#l4modal.open .modal-box,#l5modal.open .modal-box,#probemodal.open .modal-box,#phase2modal.open .modal-box,#donemodal.open .modal-box,#scnmodal.open .modal-box,#l12guide.open .modal-box,#addHeadingModal.open .modal-box{
+  transform:none;transition:transform var(--dur-base) var(--ease-soft)}
+/* Signature reveals (slice 6): level transitions breathe slower + rise a
+   touch more — the calm "arrival" beat of the app. Stage accent: the
+   level-complete banner wears the DESTINATION stage colour (memory cue:
+   banner grows into the level you are about to enter; THEME.md). */
+#l3modal .modal-box,#l4modal .modal-box,#l5modal .modal-box,#donemodal .modal-box,#l12guide .modal-box{
+  transform:translateY(18px) scale(.98)}
+#l3modal.open .modal-box,#l4modal.open .modal-box,#l5modal.open .modal-box,#donemodal.open .modal-box,#l12guide.open .modal-box{
+  transition:transform var(--dur-slow) var(--ease-soft)}
+#l12guide .modal-box{border-top:3px solid var(--stage-l12)}
+#l3modal .modal-box{border-top:3px solid var(--stage-l3)}
+#l4modal .modal-box{border-top:3px solid var(--stage-l4)}
+#l5modal .modal-box{border-top:3px solid var(--stage-l5)}
+#phase2modal .modal-box,#donemodal .modal-box{border-top:3px solid var(--stage-p2)}
+/* Slice 1 special-cases kept from the old pairs: darker backdrop +
+   topmost stacking for the shared add/rename dialog. */
+#addHeadingModal{z-index:300;background:var(--backdrop-strong)}
 .layout{display:flex;min-height:100vh}
-.sidebar{width:280px;background:#2b2b2e;padding:16px;box-sizing:border-box}
-.brand{font-weight:800;font-size:22px;margin-bottom:16px}
-.card{background:#3a3a3e;border-radius:10px;padding:14px}
-.card h3{margin:0 0 10px 0;font-size:15px}
-.btn{display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:10px;border-radius:8px;border:1px solid #555;background:#4a4a4f;color:#fff;cursor:pointer;text-align:center}
-.btn.primary{background:#2f6fed;border-color:#2f6fed}
-.btn.green{background:#1f9d55;border-color:#1f9d55}
-.btn:disabled{opacity:.45;cursor:not-allowed}
-.main{flex:1;padding:18px;display:flex;flex-direction:column;min-width:0;box-sizing:border-box}
+/* UI_ISSUES follow-up: sidebar width tracks the panel font scale (the
+   .sidebar/#panel --fs-* bump) instead of a fixed px, so cards/buttons
+   grow with the text and words stay inside their boxes. 19em ≈ 323px at
+   the 17px panel body size — a little wider than the old 280px. */
+.sidebar{width:19em;min-width:300px;max-width:380px;flex-shrink:0;background:var(--sidebar);padding:var(--sp-4);box-sizing:border-box;overflow-wrap:break-word}
+.sidebar .card,.sidebar .btn,.sidebar .file-row,.sidebar .warn,.sidebar p,.sidebar li{max-width:100%;overflow-wrap:break-word}
+.sidebar .btn{white-space:normal;line-height:1.35}
+.sidebar .file-row{gap:var(--sp-2)}
+.sidebar .file-row span:first-child{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-1);
+  font-weight:800;font-size:var(--fs-brand);margin-bottom:var(--sp-4)}
+/* Theme toggle (THEME.md): sun/moon button lives beside the brand on every
+   page; state persists in localStorage, first visit follows the OS. */
+.theme-toggle{flex-shrink:0;width:34px;height:34px;border-radius:50%;border:1px solid var(--line-strong);
+  background:var(--btn);color:var(--ink);cursor:pointer;font-size:16px;line-height:1;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:border-color var(--dur-fast) var(--ease-soft),box-shadow var(--dur-fast) var(--ease-soft),transform var(--dur-fast) var(--ease-soft)}
+.theme-toggle:hover{border-color:var(--link);box-shadow:0 0 0 1px rgba(138,180,255,.22)}
+.theme-toggle:active{transform:scale(.92)}
+.theme-toggle:focus-visible{outline:none;box-shadow:var(--ring)}
+.theme-toggle-float{position:fixed;top:12px;right:12px;z-index:400}
+.card{background:var(--card);border-radius:14px;padding:var(--sp-4);box-shadow:var(--shadow-card)}
+.card h3{margin:0 0 var(--sp-2) 0;font-size:var(--fs-title)}
+/* Stage chrome (THEME.md): sidebar stage cards wear their Bloom stage
+   colour as a 4px left border; the matching progress well inherits
+   --stage-accent for its 3px border. Stage cards only — Studying/debug
+   stay neutral so colour keeps one meaning. */
+#materialsCard{--stage-accent:var(--stage-steps)}
+#l12card{--stage-accent:var(--stage-l12)}
+#l3card{--stage-accent:var(--stage-l3)}
+#l4card{--stage-accent:var(--stage-l4)}
+#l5card{--stage-accent:var(--stage-l5)}
+#phase2card{--stage-accent:var(--stage-p2)}
+#materialsCard,#l12card,#l3card,#l4card,#l5card,#phase2card{border-left:4px solid var(--stage-accent,var(--line))}
+/* Slice 3: buttons breathe — hover glow, gentle press, focus ring.
+   :disabled stays later in the list so it wins over :hover (same specificity). */
+.btn{display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:var(--sp-2) var(--sp-3);
+  border-radius:10px;border:1px solid var(--line);background:var(--btn);color:var(--ink);
+  font-size:var(--fs-body);cursor:pointer;text-align:center;
+  transition:background var(--dur-fast) var(--ease-soft),border-color var(--dur-fast) var(--ease-soft),box-shadow var(--dur-fast) var(--ease-soft),transform var(--dur-fast) var(--ease-soft),opacity var(--dur-fast) var(--ease-soft)}
+.btn:hover{border-color:var(--link);box-shadow:0 0 0 1px rgba(138,180,255,.22),0 2px 12px rgba(0,0,0,.28)}
+.btn:active{transform:scale(.97)}
+.btn:focus-visible{outline:none;box-shadow:var(--ring)}
+/* Semantic buttons carry their own saturated bg → text stays white in BOTH
+   themes (light theme flips the default .btn ink to dark on white/neutral). */
+.btn.primary{background:var(--accent);border-color:var(--accent)}
+.btn.green{background:var(--green);border-color:var(--green)}
+.btn.primary,.btn.green,.btn.purple{color:#fff}
+.btn:disabled{opacity:.45;cursor:not-allowed;border-color:var(--line);box-shadow:none;transform:none}
+.main{flex:1;padding:var(--sp-5);display:flex;flex-direction:column;min-width:0;box-sizing:border-box}
+.main h2{font-size:var(--fs-header);margin:0 0 var(--sp-3) 0}
 /* Problem 5 follow-up: single border only (no border-inside-border).
    #graph is a transparent flex wrapper; the visible single box is
    .graph-canvas. Old double: #graph dashed + padding + svg box. */
-#graph{flex:1;min-height:0;display:flex;flex-direction:column;position:relative;color:#aaa;background:transparent;border:none;padding:0;box-sizing:border-box}
+#graph{flex:1;min-height:0;display:flex;flex-direction:column;position:relative;color:var(--muted);background:transparent;border:none;padding:0;box-sizing:border-box}
 /* Workspace fills the whole screen dynamically (picker/user pages untouched).
    Fixed viewport-height chain gives flex:1 a definite height so the canvas
    grows/shrinks with the window instead of a fixed small box. */
 .layout.workspace{height:100vh;overflow:hidden}
-.layout.workspace .sidebar{height:100vh;overflow:auto;flex-shrink:0}
+.layout.workspace .sidebar{height:100vh;overflow-y:auto;overflow-x:hidden;flex-shrink:0;display:flex;flex-direction:column} /* flex column + #stageMeter margin-top:auto = meter pinned at the panel bottom (UI_ISSUES.txt #1) */
 .layout.workspace .main{height:100vh;overflow:hidden;box-sizing:border-box}
-.layout.workspace .main h2{flex-shrink:0;margin:0 0 12px 0}
 .layout.workspace #edgePanel,.layout.workspace #debugCard{flex-shrink:0}
 .layout.workspace #debugCard{max-height:160px;overflow:auto}
-.node-blue{color:#6aa8ff}
-#panel{position:fixed;top:0;right:-380px;width:360px;height:100vh;background:#1d1d20;border-left:1px solid #444;transition:right .2s;padding:14px;box-sizing:border-box;overflow-y:auto}
-#panel.open{right:0}
-#modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#modal.open{display:flex}
-.modal-box{background:#222;border:1px solid #555;border-radius:12px;padding:18px;min-width:320px;max-width:560px}
-#progress{margin-top:12px;background:#1c1c1f;border:1px solid #444;border-radius:8px;padding:10px}
-input[type=text]{width:100%;padding:9px;border-radius:8px;border:1px solid #555;background:#141416;color:#eee;box-sizing:border-box}
-.file-row{display:flex;justify-content:space-between;align-items:center;background:#45454a;border-radius:6px;padding:6px 8px;margin:6px 0}
+.node-blue{color:var(--link)}
+/* Slice 2: drawer slides softly (base token) + carries a soft shadow so
+   it reads as a layer floating over the workspace, not a wall. */
+/* UI_ISSUES.txt #2 addition: the drawer carries the stage ambient glow —
+   a ::before veil tinted with --glow (set by stageflow.js to the current
+   stage colour; transparent fallback = zero glow pre-init and on pages
+   without the flow), plus a stage-coloured halo layered into the open
+   shadow. --glow changes crossfade on the --dur-slow token. */
+#panel{position:fixed;top:0;right:-380px;width:360px;height:100vh;background:var(--panel);border-left:1px solid var(--line-soft);transition:right var(--dur-base) var(--ease-soft),box-shadow var(--dur-slow) var(--ease-soft);padding:var(--sp-4);box-sizing:border-box;overflow-y:auto}
+#panel.open{right:0;box-shadow:-12px 0 40px rgba(0,0,0,.35),0 0 56px -8px color-mix(in srgb,var(--glow,transparent) 40%,transparent)}
+#panel::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background-color:color-mix(in srgb,var(--glow,transparent) 12%,transparent);
+  transition:background-color var(--dur-slow) var(--ease-soft)}
+/* #modal/#l3modal/... display pairs replaced by the overlay system block
+   above (MOTION.md). */
+/* === UI_ISSUES.txt: enlarged floating middle panels (all stage modals) ==
+   Every centered stage dialog was compact (320-560px, 14/16px type).
+   Same token re-scope pattern as the sidebar/#panel bump: ~20-25% type
+   growth inside .modal-box / edge panels only — global tokens untouched
+   so picker/user pages stay as they were. Boxes grow with the text and
+   keep 92-94vw caps so small screens never overflow. Messages for each
+   stage (#warnBox/#lockBox/#scnMsg/#probeWhyFb/#probeFailFb/#probeMsg/
+   #phase2warn/#addHeadingSub/#addHeadingMsg/#edgeSub/#edgeMsg/
+   #edgeSelectedSub/#edgeSelectedMsg + plain <p>/label inside modals)
+   inherit the bumped body size. */
+.modal-box{background:var(--modal);border:1px solid var(--line);border-radius:16px;padding:var(--sp-6);min-width:min(400px,92vw);max-width:640px;box-shadow:var(--shadow-float);
+  --fs-caption:15px;
+  --fs-body:17px;
+  --fs-title:21px;
+  font-size:var(--fs-body)}
+.modal-box .modal-head h3{font-size:var(--fs-title)}
+.modal-box p,.modal-box label{font-size:var(--fs-body)}
+.modal-box .warn,.modal-box .lock{font-size:var(--fs-body);padding:var(--sp-3)}
+#warnBox,#lockBox,#scnMsg,#probeWhyFb,#probeFailFb,#probeMsg,#phase2warn,#addHeadingSub,#addHeadingMsg,#edgeSub,#edgeMsg,#edgeSelectedSub,#edgeSelectedMsg{font-size:var(--fs-body)}
+.modal-box textarea{font-size:var(--fs-body)}
+.modal-box .icon-btn{font-size:18px}
+/* === UI_ISSUES.txt #1: stage percentage → BAR meter at the panel bottom =
+   ONE meter replaces all stage percentage text: #stageMeter anchors the
+   BOTTOM of the left panel (.layout.workspace .sidebar flex column +
+   margin-top:auto), the bar fills left→right with the CURRENT stage's
+   --stage-accent, and the NUMBER PERCENTAGE renders in the MIDDLE of the
+   bar (fraction is a small caption under it). meter.js repaints on every
+   stage paint; sync() (via the refreshSidebar chokepoint) shows it only
+   on L1-2/L3/L5 and swaps the accent. The stage cards' old percentage
+   slots (#progress etc.) keep only the stage-complete Continue buttons
+   now (centered). */
+#stageMeter{margin-top:auto;padding-top:var(--sp-3);text-align:center}
+#stageMeter .cm-bar{position:relative;height:30px;border-radius:999px;background:var(--inset);border:1px solid var(--line-soft);overflow:hidden}
+#stageMeter .cm-fill{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--stage-accent,var(--accent));transition:width var(--dur-slow) var(--ease-soft)}
+#stageMeter .cm-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:var(--ink);text-shadow:0 1px 2px rgba(0,0,0,.25)}
+#stageMeter .cm-num i{font-style:normal;font-size:11px;transform:translateY(1px)}
+#stageMeter .cm-sub{margin-top:var(--sp-1);font-size:var(--fs-caption);color:var(--muted)}
+/* green Continue buttons centered under their card content — .sm margin:0 +
+   .green-inline margin-left would skew a standalone button off-center. */
+#progress,#l3progress,#l5progress{margin-top:var(--sp-2);text-align:center}
+#progress .green-inline,#l3progress .green-inline,#l5progress .green-inline{margin-left:0}
+/* Slice 3: text fields get the shared focus ring + soft border color.
+   (Replaces the one-off #addHeadingInput:focus rule — same look, everywhere.) */
+input[type=text]{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--ink);font-size:var(--fs-body);box-sizing:border-box;transition:border-color var(--dur-fast) var(--ease-soft),box-shadow var(--dur-fast) var(--ease-soft)}
+select{font-size:var(--fs-body);transition:border-color var(--dur-fast) var(--ease-soft),box-shadow var(--dur-fast) var(--ease-soft)}
+input[type=text]:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:var(--ring)}
+.file-row{display:flex;justify-content:space-between;align-items:center;background:var(--row);border-radius:6px;padding:6px var(--sp-2);margin:6px 0;font-size:var(--fs-body)}
 /* Step 1 slice: Extracted Concepts modal tree */
-.modal-wide{min-width:min(640px,92vw);max-width:720px;max-height:86vh;overflow:auto}
+.modal-wide{min-width:min(720px,94vw);max-width:800px;max-height:86vh;overflow:auto}
 .modal-head{display:flex;justify-content:space-between;align-items:center}
-.btn.sm{width:auto;padding:4px 10px;margin:0}
-.warn{background:#5a2b2b;border:1px solid #a44;border-radius:8px;padding:8px;margin:8px 0}
-.lock{background:#22304a;border:1px solid #2f6fed;border-radius:8px;padding:10px;margin:8px 0}
+.btn.sm{width:auto;padding:var(--sp-1) var(--sp-3);margin:0;font-size:var(--fs-caption)}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:8px;padding:var(--sp-2);margin:var(--sp-2) 0}
+.lock{background:var(--lock-bg);border:1px solid var(--lock-line);border-radius:8px;padding:var(--sp-2);margin:var(--sp-2) 0}
 .hidden{display:none}
-.tree-main{border:1px solid #555;border-radius:8px;margin:8px 0;padding:8px}
-.tree-row{display:flex;align-items:center;gap:8px;padding:5px 4px}
+.tree-main{border:1px solid var(--line-strong);border-radius:8px;margin:var(--sp-2) 0;padding:var(--sp-2)}
+.tree-row{display:flex;align-items:center;gap:var(--sp-2);padding:5px var(--sp-1)}
 .tree-row.sub{margin-left:26px}
 .tree-row input[type=text]{padding:6px}
 .tree-title{flex:1}
-.icon-btn{background:none;border:none;color:#ccc;cursor:pointer;font-size:15px;padding:2px 6px}
-.icon-btn:hover{color:#fff}
-.row-extracted{background:#2a2a2e;border-radius:6px}
-.row-user{background:#12325e;border:1px solid #2f6fed;border-radius:6px}
-.row-user .tree-title{color:#bcd6ff}
-.add-line{height:14px;background:#e8e8e8;border-radius:7px;margin:6px 0;opacity:.85;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#111;font-size:12px}
+.icon-btn{background:none;border:none;color:var(--icon);cursor:pointer;font-size:15px;padding:2px 6px;transition:color var(--dur-fast) var(--ease-soft),transform var(--dur-fast) var(--ease-soft)}
+.icon-btn:hover{color:var(--ink)}
+.icon-btn:active{transform:scale(.9)}
+.row-extracted{background:var(--chip);border-radius:6px}
+.row-user{background:var(--ube-soft);border:1px solid var(--ube);border-radius:6px}
+.row-user .tree-title{color:var(--ube-ink)}
+.add-line{height:14px;background:var(--add-line);border-radius:7px;margin:6px 0;opacity:.85;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#111;font-size:var(--fs-caption)}
 .add-line.sub{margin-left:26px}
-.add-line:hover{background:#2f6fed;color:#fff}
-.modal-foot{margin-top:10px}
-.graph-nodes{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.gnode{background:#2e2e33;border:1px solid #666;border-radius:16px;padding:8px 12px}
-.gnode.blue{background:#12325e;border-color:#2f6fed;color:#bcd6ff}
+.add-line:hover{background:var(--ube);color:#fff}
+.modal-foot{margin-top:var(--sp-2)}
+.graph-nodes{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-top:var(--sp-2)}
+.gnode{background:var(--chip);border:1px solid var(--line-strong);border-radius:16px;padding:var(--sp-2) var(--sp-3)}
+.gnode.blue{background:var(--ube-soft);border-color:var(--ube);color:var(--ube-ink)}
 .gnode[data-node]{cursor:pointer}
-.gnode[data-node]:hover{border-color:#8ab4ff}
+.gnode[data-node]:hover{border-color:var(--link)}
 /* B1 canvas (Locks §0+§4): SVG nodes + ordered edges with mid-line labels */
 /* Problem 5: workspace fills middle (.main flex column, #graph flex:1) +
    background-drag pan + wheel zoom (viewBox). Controls overlay top-right.
    Absolute-fill svg: flex-sized SVG collapses in some browsers, so the canvas
    box carries the flex size and the svg/empty state absolutely fill it. */
-.graph-canvas{margin-top:0;flex:1;min-height:0;position:relative;display:block;overflow:hidden;border-radius:10px;background:#141416;border:1px solid #444}
+.graph-canvas{margin-top:0;flex:1;min-height:0;position:relative;display:block;overflow:hidden;border-radius:12px;background:var(--canvas);border:1px solid var(--line-soft)}
 .graph-canvas svg{position:absolute;left:0;top:0;width:100%;height:100%;background:transparent;border:none;border-radius:0;display:block;cursor:grab;touch-action:none}
 .graph-canvas svg.panning{cursor:grabbing}
-.graph-controls{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:5}
-.graph-controls button{width:32px;height:32px;border-radius:8px;border:1px solid #555;background:#2b2b2e;color:#eee;cursor:pointer;font-size:16px;line-height:1;padding:0}
-.graph-controls button:hover{border-color:#8ab4ff}
-.graph-empty{position:absolute;left:0;top:0;right:0;bottom:0;padding:24px;text-align:center;color:#aaa;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
+.graph-controls{position:absolute;top:var(--sp-2);right:var(--sp-2);display:flex;gap:6px;z-index:5}
+.graph-controls button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--sidebar);color:var(--ink);cursor:pointer;font-size:16px;line-height:1;padding:0;transition:border-color var(--dur-fast) var(--ease-soft),box-shadow var(--dur-fast) var(--ease-soft),transform var(--dur-fast) var(--ease-soft)}
+.graph-controls button:hover{border-color:var(--link);box-shadow:0 0 0 1px rgba(138,180,255,.22)}
+.graph-controls button:active{transform:scale(.94)}
+.graph-empty{position:absolute;left:0;top:0;right:0;bottom:0;padding:var(--sp-5);text-align:center;color:var(--muted);display:flex;align-items:center;justify-content:center;box-sizing:border-box}
 .layout.workspace .graph-nodes{flex:1;overflow:auto}
-#graphSvg .gedge line{stroke:#999;stroke-width:2}
-#graphSvg .gedge{cursor:pointer}
-#graphSvg .edge-label{fill:#fff;font-size:12px;font-weight:700;text-anchor:middle;paint-order:stroke;stroke:#111;stroke-width:3px}
+#graphSvg .gedge line{stroke:var(--edge-default);stroke-width:2;transition:stroke var(--dur-base) var(--ease-soft)}
+#graphSvg .gedge{cursor:pointer;transition:opacity var(--dur-base) var(--ease-soft)}
+#graphSvg .edge-label{fill:var(--edge-label-ink);font-size:var(--fs-node);font-weight:700;text-anchor:middle;paint-order:stroke;stroke:#111;stroke-width:3px}
 /* UI_ISSUES.txt Problem 1: every link type has its own color (line + label).
-   data-etype is the lowercased edge_type set in l4.js paintGraph. */
-#graphSvg .gedge[data-etype="causes"] line{stroke:#800000}
-#graphSvg .gedge[data-etype="causes"] .edge-label{fill:#e8a0a0}
-#graphSvg .gedge[data-etype="leads to"] line{stroke:#2563eb}
-#graphSvg .gedge[data-etype="leads to"] .edge-label{fill:#9dbcff}
-#graphSvg .gedge[data-etype="depends on"] line{stroke:#16a34a}
-#graphSvg .gedge[data-etype="depends on"] .edge-label{fill:#7ce3a3}
-#graphSvg .gedge[data-etype="includes"] line{stroke:#f97316}
-#graphSvg .gedge[data-etype="includes"] .edge-label{fill:#fec89b}
-#graphSvg .gedge[data-etype="contrasts with"] line{stroke:#dc2626}
-#graphSvg .gedge[data-etype="contrasts with"] .edge-label{fill:#f3a3a3}
-#graphSvg .gedge[data-etype="applied in"] line{stroke:#1e3a8a}
-#graphSvg .gedge[data-etype="applied in"] .edge-label{fill:#a9c2f5}
-#graphSvg .gedge[data-etype="influences"] line{stroke:#9333ea}
-#graphSvg .gedge[data-etype="influences"] .edge-label{fill:#d3b5fb}
-#graphSvg .gedge[data-etype="consists of"] line{stroke:#166534}
-#graphSvg .gedge[data-etype="consists of"] .edge-label{fill:#8fe3bd}
+   data-etype is the lowercased edge_type set in l4.js paintGraph. Colours
+   are theme tokens now — dark = brightened canvas tones, light = original
+   saturated hues (THEME.md). One token per type drives line + label +
+   arrowhead, so the three never drift apart. */
+#graphSvg .gedge[data-etype="causes"] line{stroke:var(--edge-causes)}
+#graphSvg .gedge[data-etype="causes"] .edge-label{fill:var(--edge-causes)}
+#graphSvg .gedge[data-etype="leads to"] line{stroke:var(--edge-leads-to)}
+#graphSvg .gedge[data-etype="leads to"] .edge-label{fill:var(--edge-leads-to)}
+#graphSvg .gedge[data-etype="depends on"] line{stroke:var(--edge-depends-on)}
+#graphSvg .gedge[data-etype="depends on"] .edge-label{fill:var(--edge-depends-on)}
+#graphSvg .gedge[data-etype="includes"] line{stroke:var(--edge-includes)}
+#graphSvg .gedge[data-etype="includes"] .edge-label{fill:var(--edge-includes)}
+#graphSvg .gedge[data-etype="contrasts with"] line{stroke:var(--edge-contrasts)}
+#graphSvg .gedge[data-etype="contrasts with"] .edge-label{fill:var(--edge-contrasts)}
+#graphSvg .gedge[data-etype="applied in"] line{stroke:var(--edge-applied-in)}
+#graphSvg .gedge[data-etype="applied in"] .edge-label{fill:var(--edge-applied-in)}
+#graphSvg .gedge[data-etype="influences"] line{stroke:var(--edge-influences)}
+#graphSvg .gedge[data-etype="influences"] .edge-label{fill:var(--edge-influences)}
+#graphSvg .gedge[data-etype="consists of"] line{stroke:var(--edge-consists)}
+#graphSvg .gedge[data-etype="consists of"] .edge-label{fill:var(--edge-consists)}
 /* Custom (any non-preset) stays grey via the default above; explicit rule
-   for rows/panel dots uses #9ca3af. */
+   for rows/panel dots uses the --edge-custom token. */
+#graphSvg .gedge[data-etype="custom"] line{stroke:var(--edge-custom)}
+#graphSvg .gedge[data-etype="custom"] .edge-label{fill:var(--edge-custom)}
 /* L5 dim/bright must win over per-type colors — keep these AFTER type rules. */
-#graphSvg .gedge.edge-dim line{stroke:#555}
-#graphSvg .gedge.edge-dim .edge-label{fill:#fff}
+#graphSvg .gedge.edge-dim line{stroke:var(--edge-dim)}
+#graphSvg .gedge.edge-dim .edge-label{fill:var(--edge-label-ink)}
 #graphSvg .gedge.edge-dim{opacity:.38}
 /* Drag-link ghost: dashed dimmed blue = in-progress preview (not a saved
    link). Saved links use solid per-type colors; ghost vanishes on drop. */
-#graphSvg .drag-ghost{stroke:#5a7fa6;stroke-width:2.5;stroke-dasharray:7 5;fill:none;pointer-events:none;opacity:.85}
+#graphSvg .drag-ghost{stroke:var(--edge-ghost);stroke-width:2.5;stroke-dasharray:7 5;fill:none;pointer-events:none;opacity:.85}
 @media (prefers-reduced-motion: no-preference) {
   #graphSvg .drag-ghost{animation:cogDash .6s linear infinite}
   @keyframes cogDash{to{stroke-dashoffset:-12}}
 }
+/* === UI_ISSUES.txt #1: bigger panel text (grilling Q1-Q2) ==============
+   The SAME token names are re-scoped inside the two panels (left sidebar +
+   right concept drawer): ~20-25% uniform bump, hierarchy untouched. The
+   GLOBAL scale keeps its old values, so modals and the picker/user pages
+   stay exactly as they were ("everything textual inside those panels"
+   only). Panels keep their widths; larger text wraps / scrolls internally.
+   Elements with no explicit font-size rule inherit the bumped base via
+   the trailing font-size line. */
+.sidebar, #panel{
+  --fs-caption:15px;  /* 12 -> 15: tags, badges, labels */
+  --fs-body:17px;     /* 14 -> 17: base UI inside the panels */
+  --fs-title:20px;    /* 16 -> 20: card/drawer headings */
+  font-size:var(--fs-body);
+}
 /* Per-type dots in selected popup + #edgeOpts picker. */
 .link-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:baseline}
 .edge-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin:0 6px 0 4px;vertical-align:baseline}
-.edge-custom-hint{color:#aaa;font-size:12px}
+.edge-custom-hint{color:var(--muted);font-size:var(--fs-caption)}
 /* Valid drop target while dragging: glowing ring (same node never glows). */
-#graphSvg g.gnode.drop-target circle{stroke:#8ab4ff;stroke-width:3;filter:drop-shadow(0 0 6px rgba(138,180,255,.9))}
+#graphSvg g.gnode.drop-target circle{stroke:var(--link);stroke-width:3;filter:drop-shadow(0 0 6px rgba(47,111,237,.65))}
 #graphSvg g.gnode{cursor:grab}
 #graphSvg g.gnode.dragging{cursor:grabbing}
-#graphSvg g.gnode.dragging circle{stroke:#fff;stroke-width:2.5;filter:drop-shadow(0 0 8px rgba(255,255,255,.5))}
+#graphSvg g.gnode.dragging circle{stroke:var(--node-active);stroke-width:2.5;filter:drop-shadow(0 0 8px rgba(128,128,128,.5))}
 @media (prefers-reduced-motion: no-preference) {
-  /* Fluid micro-interactions: hover lift + grab scale + pulsing target.
-     transform-box keeps SVG <g> scaling centered. Transitions are short
-     (120ms) to stay snappy + precise for L4 link drops. */
-  #graphSvg g.gnode{transform-box:fill-box;transform-origin:center;transition:transform 120ms ease-out,filter 120ms ease-out}
+  /* Soft micro-interactions (MOTION.md slice 5): hover lift + grab scale +
+     gentle glow pulse. Cursor-following paths (drag cx/cy, link ghost) are
+     attribute-driven and stay un-eased (precision boundary — MOTION.md).
+     Durations ride the calm tokens; the old 120ms snap is retired. */
+  #graphSvg g.gnode{transform-box:fill-box;transform-origin:center;transition:transform var(--dur-base) var(--ease-soft),filter var(--dur-base) var(--ease-soft),opacity var(--dur-base) var(--ease-soft)}
   #graphSvg g.gnode:hover{transform:scale(1.04)}
   #graphSvg g.gnode.dragging{transform:scale(1.06)}
-  #graphSvg g.gnode.drop-target{animation:cogPulse .9s ease-in-out infinite}
-  @keyframes cogPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
-  #graphSvg .edge-label{transition:opacity 120ms ease-out}
+  /* Drop target: a slow breathing glow (opacity pulse) instead of the old
+     scale pop — calmer, still unmistakable. Static ring rule (stroke +
+     drop-shadow) stays outside; this animates its intensity only. */
+  #graphSvg g.gnode.drop-target circle{animation:cogGlow 1.6s ease-in-out infinite}
+  @keyframes cogGlow{0%,100%{stroke-opacity:.45}50%{stroke-opacity:1}}
+  #graphSvg .edge-label{transition:opacity var(--dur-base) var(--ease-soft)}
   #graphSvg.dragging-active .edge-label{opacity:.85}
 }
-#graphSvg g.gnode circle{fill:#2e2e33;stroke:#888;stroke-width:1.5}
-#graphSvg g.gnode.blue circle{fill:#12325e;stroke:#2f6fed}
+#graphSvg g.gnode circle{fill:var(--node-bg);stroke:var(--node-line);stroke-width:1.5}
+#graphSvg g.gnode.blue circle{fill:var(--ube-soft);stroke:var(--ube)}
 #graphSvg g.gnode.dimmed{opacity:.45}
-#graphSvg g.gnode:hover circle{stroke:#8ab4ff}
-#graphSvg .node-label{fill:#eee;font-size:11px;text-anchor:middle;pointer-events:none}
-#graphSvg g.gnode.blue .node-label{fill:#bcd6ff}
+#graphSvg g.gnode:hover circle{stroke:var(--link)}
+#graphSvg .node-label{fill:var(--ink);font-size:var(--fs-node);text-anchor:middle;pointer-events:none}
+#graphSvg g.gnode.blue .node-label{fill:var(--ube-ink)}
 /* Step 2 slice: L1-2 drawer + L3 transition */
 .drawer-head{display:flex;justify-content:space-between;align-items:center}
-.expl-box{background:#242428;border:1px solid #555;border-radius:8px;padding:10px;margin:10px 0}
-.expl-tag{font-size:12px;color:#9fb6dd;margin-bottom:6px}
+.expl-box{background:var(--softcard);border:1px solid var(--line);border-radius:8px;padding:var(--sp-2);margin:var(--sp-2) 0}
+.expl-tag{font-size:var(--fs-caption);color:var(--tint-ink);margin-bottom:6px}
 .expl-text{white-space:pre-wrap}
-.expl-text.muted{color:#aaa}
-.expl-diag{margin-top:8px;font-size:13px;color:#c9b98a}
-textarea{width:100%;box-sizing:border-box;background:#141416;color:#eee;border:1px solid #555;border-radius:8px;padding:9px;font-family:inherit}
-#drawerFb{margin-top:8px}
-.fb-ok{color:#5fd08a;font-weight:700}
-.fb-bad{color:#e08a8a;font-weight:700}
-.fb-hint{color:#c9b98a;margin-top:4px}
-#l3modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#l3modal.open{display:flex}
-#l12guide{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#l12guide.open{display:flex}
+.expl-text.muted{color:var(--muted)}
+.expl-diag{margin-top:var(--sp-2);font-size:var(--fs-body);color:var(--hint)}
+textarea{width:100%;box-sizing:border-box;background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px;font-family:inherit;font-size:var(--fs-body);transition:border-color var(--dur-fast) var(--ease-soft),box-shadow var(--dur-fast) var(--ease-soft)}
+#drawerFb{margin-top:var(--sp-2)}
+.fb-ok{color:var(--ok);font-weight:700}
+.fb-bad{color:var(--bad);font-weight:700}
+.fb-hint{color:var(--hint);margin-top:var(--sp-1)}
+/* #l3modal + #l12guide display pairs → overlay system block. */
 .green-inline{width:auto;display:inline-block;padding:2px 10px;margin-left:8px}
-.btn.purple{background:#6d28d9;border-color:#6d28d9}
-/* Step 3 slice: L3 scenario split panel + L4 transition */
-#scnmodal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#scnmodal.open{display:flex}
-.scn-split{display:flex;gap:14px}
-.scn-left{flex:1;background:#242428;border-radius:8px;padding:10px}
+.btn.purple{background:var(--purple);border-color:var(--purple)}
+/* Step 3 slice: L3 scenario split panel + L4 transition
+   (scnmodal/l4modal/l5modal/probemodal/phase2modal/donemodal display pairs
+   removed — overlay system block owns them.) */
+.scn-split{display:flex;gap:var(--sp-3)}
+.scn-left{flex:1;background:var(--softcard);border-radius:8px;padding:var(--sp-2)}
 .scn-right{flex:1}
-.scn-row{border:1px solid #555;border-radius:8px;padding:8px;margin:8px 0}
+.scn-row{border:1px solid var(--line);border-radius:8px;padding:var(--sp-2);margin:var(--sp-2) 0}
 .scn-row label{display:flex;gap:6px;align-items:center;margin-bottom:6px}
-.scn-row.locked-green{border-color:#1f9d55;background:#0f2e1d}
-#l4modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#l4modal.open{display:flex}
-#l5modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#l5modal.open{display:flex}
-#probemodal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#probemodal.open{display:flex}
-#phase2modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#phase2modal.open{display:flex}
-#donemodal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center}
-#donemodal.open{display:flex}
+.scn-row.locked-green{border-color:var(--green);background:var(--scn-locked)}
+/* (display pairs removed — overlay system block owns them.) */
 .mid-label{font-weight:700}
-/* Click-to-select delete (L4, no link list): selected edge gets a white glow
-   readable on all 9 per-type colors; popup offers Delete only. */
-#graphSvg .gedge.selected line{stroke-width:4;filter:drop-shadow(0 0 5px rgba(255,255,255,.85))}
-#graphSvg .gedge.selected .edge-label{fill:#fff}
-#edgeSelectedPanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:200;width:min(400px,92vw);background:#222;border:1px solid #555;border-radius:12px;padding:16px;box-sizing:border-box;box-shadow:0 18px 60px rgba(0,0,0,.6)}
-#edgeSelectedPanel::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:-1}
-#edgeSelectedPanel .modal-head h4{margin:0}
-#edgeSelectedSub{margin:8px 0}
-#edgeSelectedMsg{margin:8px 0;color:#e08a8a;min-height:1em}
-#edgeSelectedDelete{width:auto;background:#7f1d1d;border:1px solid #a44;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer}
-#edgeSelectedDelete:hover{background:#991b1b}
-#edgePanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:200;width:min(440px,92vw);max-height:82vh;overflow:auto;background:#222;border:1px solid #555;border-radius:12px;padding:18px;margin:0;box-sizing:border-box;box-shadow:0 18px 60px rgba(0,0,0,.6)}
-#edgePanel::before{content:"";position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:-1}
-#edgePanel .modal-head h4{margin:0}
-#edgeSub{margin:6px 0 10px 0}
-#edgeOpts{margin:10px 0}
-#edgeOpts label{display:block;padding:4px 6px;border-radius:6px;cursor:pointer}
-#edgeOpts label:hover{background:#2e2e33}
+/* Click-to-select delete (L4, no link list): selected edge gets a glow
+   readable on all 9 per-type colors in BOTH themes; popup offers Delete only. */
+#graphSvg .gedge.selected line{stroke-width:4;filter:drop-shadow(0 0 5px var(--edge-select-glow))}
+#graphSvg .gedge.selected .edge-label{fill:var(--edge-label-ink)}
+/* Link popups (.hidden-toggled, MOTION.md slice 1): same soft overlay
+   motion via :not(.hidden) states. .hidden is overridden to display:block
+   so the element stays in-tree and the exit fade can run; visibility
+   handles non-interactivity while hidden. */
+#edgeSelectedPanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-46%) scale(.985);opacity:0;visibility:hidden;z-index:200;width:min(500px,94vw);background:var(--modal);border:1px solid var(--line);border-radius:16px;padding:var(--sp-5);box-sizing:border-box;box-shadow:var(--shadow-float);transition:opacity var(--dur-exit) var(--ease-exit),transform var(--dur-exit) var(--ease-exit),visibility 0s linear var(--dur-exit);--fs-caption:15px;--fs-body:17px;--fs-title:21px;font-size:var(--fs-body)}
+#edgeSelectedPanel.hidden{display:block}
+#edgeSelectedPanel:not(.hidden){opacity:1;visibility:visible;transform:translate(-50%,-50%);transition:opacity var(--dur-base) var(--ease-soft),transform var(--dur-base) var(--ease-soft)}
+#edgeSelectedPanel::before{content:"";position:fixed;inset:0;background:var(--backdrop);z-index:-1}
+#edgeSelectedPanel .modal-head h4{margin:0;font-size:20px}
+#edgeSelectedSub{margin:var(--sp-2) 0}
+#edgeSelectedMsg{margin:var(--sp-2) 0;color:var(--bad);min-height:1em}
+#edgeSelectedDelete{width:auto;background:var(--danger);border:1px solid var(--danger);color:#fff;border-radius:8px;padding:var(--sp-2) var(--sp-3);cursor:pointer}
+#edgeSelectedDelete:hover{opacity:.88}
+#edgePanel{position:fixed;left:50%;top:50%;transform:translate(-50%,-46%) scale(.985);opacity:0;visibility:hidden;z-index:200;width:min(540px,94vw);max-height:82vh;overflow:auto;background:var(--modal);border:1px solid var(--line);border-radius:16px;padding:var(--sp-5);margin:0;box-sizing:border-box;box-shadow:var(--shadow-float);transition:opacity var(--dur-exit) var(--ease-exit),transform var(--dur-exit) var(--ease-exit),visibility 0s linear var(--dur-exit);--fs-caption:15px;--fs-body:17px;--fs-title:21px;font-size:var(--fs-body)}
+#edgePanel.hidden{display:block}
+#edgePanel:not(.hidden){opacity:1;visibility:visible;transform:translate(-50%,-50%);transition:opacity var(--dur-base) var(--ease-soft),transform var(--dur-base) var(--ease-soft)}
+#edgePanel .modal-head h4{margin:0;font-size:20px}
+#edgeSub{margin:6px 0 var(--sp-2) 0}
+#edgeOpts{margin:var(--sp-2) 0}
+#edgeOpts label{display:block;padding:var(--sp-1) 6px;border-radius:6px;cursor:pointer}
+#edgeOpts label:hover{background:var(--chip)}
 .tree-row.dimmed,.tree-main.dimmed{opacity:.45}
-.hist-row{border-bottom:1px solid #444;padding:4px 0;font-size:13px}
-#histBox{margin-top:14px;border-top:1px solid #444;padding-top:10px}
-.hist-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.hist-title{font-weight:800;font-size:14px;flex:1}
-.hist-head select{background:#141416;color:#eee;border:1px solid #555;border-radius:6px;padding:4px 6px;font-size:12px;max-width:110px}
+.hist-row{border-bottom:1px solid var(--line-soft);padding:var(--sp-1) 0;font-size:var(--fs-body)}
+#histBox{margin-top:var(--sp-3);border-top:1px solid var(--line-soft);padding-top:var(--sp-2)}
+.hist-head{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-2)}
+.hist-title{font-weight:800;font-size:var(--fs-body);flex:1}
+.hist-head select{background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:var(--fs-caption);max-width:110px}
 #histItem{max-width:200px;text-overflow:ellipsis}
 #histView{max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding-right:2px}
-.hist-card{background:#242428;border:1px solid #555;border-radius:10px;padding:10px 12px;font-size:13px}
-.hist-card-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.hist-concept{font-weight:800;font-size:14px;flex:1;overflow:hidden;text-overflow:ellipsis}
-.hist-badge{font-size:11px;color:#9fb6dd;background:#1c1c1f;border:1px solid #444;border-radius:20px;padding:2px 8px;white-space:nowrap}
-.hist-sec{margin-top:8px}
+.hist-card{background:var(--softcard);border:1px solid var(--line);border-radius:12px;padding:10px var(--sp-3);font-size:var(--fs-body)}
+.hist-card-head{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-2)}
+.hist-concept{font-weight:800;font-size:var(--fs-body);flex:1;overflow:hidden;text-overflow:ellipsis}
+.hist-badge{font-size:var(--fs-caption);color:var(--tint-ink);background:var(--inset);border:1px solid var(--line-soft);border-radius:20px;padding:2px var(--sp-2);white-space:nowrap}
+.hist-sec{margin-top:var(--sp-2)}
 .hist-sec:first-of-type{margin-top:0}
-.hist-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#9fb6dd;margin-bottom:4px}
-.hist-val{background:#1c1c1f;border:1px solid #444;border-radius:8px;padding:8px;white-space:pre-wrap}
-.hist-val.muted{color:#aaa;background:transparent;border:none;padding:4px 0 0 0}
-.hist-meta{font-size:12px;color:#aaa;margin-top:6px}
-.muted{color:#aaa}
+.hist-label{font-size:var(--fs-caption);font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--tint-ink);margin-bottom:var(--sp-1)}
+.hist-val{background:var(--inset);border:1px solid var(--line-soft);border-radius:8px;padding:var(--sp-2);white-space:pre-wrap}
+.hist-val.muted{color:var(--muted);background:transparent;border:none;padding:var(--sp-1) 0 0 0}
+.hist-meta{font-size:var(--fs-caption);color:var(--muted);margin-top:6px}
+.muted{color:var(--muted)}
 /* UI_ISSUES.txt Problem 3: floating centered add/rename heading panel.
    Shared by main + sub adds (steps12.js + phase2.js). Overlay centers a
    compact pretty card above all other modals (z-index 300). */
-#addHeadingModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:300}
-#addHeadingModal.open{display:flex}
-.add-heading-box{width:min(420px,92vw);background:#26262b;border:1px solid #5a5a62;border-radius:14px;padding:20px 20px 16px;box-shadow:0 24px 70px rgba(0,0,0,.65);box-sizing:border-box}
-.add-heading-box .modal-head h3{margin:0;font-size:17px}
-#addHeadingSub{margin:8px 0 12px 0;font-size:13px}
-.add-heading-label{display:block;font-size:13px;font-weight:600;color:#c9c9d4;margin:0 0 12px 0}
-.add-heading-label select{display:block;width:100%;margin-top:6px;background:#141416;color:#eee;border:1px solid #555;border-radius:8px;padding:9px;font-family:inherit;font-size:14px;box-sizing:border-box}
-#addHeadingInput{font-size:15px;padding:11px 12px;margin-bottom:4px}
-#addHeadingInput:focus{outline:none;border-color:#2f6fed;box-shadow:0 0 0 2px rgba(47,111,237,.35)}
-#addHeadingMsg{margin:10px 0 0 0}
-.add-heading-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
-.add-heading-foot .btn{width:auto;min-width:96px;margin:0;padding:10px 18px}
+/* #addHeadingModal display pair → overlay system block (z-index/backdrop
+   kept via its specific rule there). */
+.add-heading-box{width:min(520px,94vw);background:var(--modal);border:1px solid var(--line);border-radius:16px;padding:var(--sp-6) var(--sp-6) var(--sp-5);box-shadow:var(--shadow-float);box-sizing:border-box}
+.add-heading-box .modal-head h3{margin:0;font-size:var(--fs-title)}
+#addHeadingSub{margin:var(--sp-2) 0 var(--sp-3) 0;font-size:var(--fs-body)}
+.add-heading-label{display:block;font-size:var(--fs-body);font-weight:600;color:var(--ink);margin:0 0 var(--sp-3) 0}
+.add-heading-label select{display:block;width:100%;margin-top:6px;background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px;font-family:inherit;font-size:var(--fs-body);box-sizing:border-box}
+#addHeadingInput{font-size:17px;padding:var(--sp-3);margin-bottom:var(--sp-1)}
+/* (focus ring generalized to all inputs/textarea/select — slice 3.) */
+#addHeadingMsg{margin:var(--sp-2) 0 0 0}
+.add-heading-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:var(--sp-3)}
+.add-heading-foot .btn{width:auto;min-width:96px;margin:0;padding:var(--sp-2) 18px}
+/* === Slice 4 + 6: soft entrances (MOTION.md) ===========================
+   Content that re-renders (innerHTML swaps recreate nodes → animation
+   restarts) or un-hides (display change restarts) gets a gentle fade-rise.
+   textContent-driven containers with no hidden-toggle (#edgeMsg,
+   #edgeSelectedMsg) stay instant — CSS cannot replay on text change and
+   the surrounding panel already carries the motion. Sidebar .hidden card
+   toggles stay structural/instant (MOTION.md "not animated"). */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes cogMsgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  /* Feedback lines: drawer verify, scenario results, probe lanes, popup msgs. */
+  #drawerFb > *,#scnMsg > *,#probeWhyFb > *,#probeFailFb > *,#probeMsg > *{animation:cogMsgIn var(--dur-base) var(--ease-soft)}
+  /* Warn/lock boxes that un-hide dynamically (never the statically-visible
+     l4warn/l5warn — a page-load animation there would read as noise). */
+  #warnBox:not(.hidden),#fileWarn:not(.hidden),#lockBox:not(.hidden),#addHeadingMsg:not(.hidden){animation:cogMsgIn var(--dur-base) var(--ease-soft)}
+  /* List cards re-render on every stage/item switch — soft arrival each time. */
+  .hist-card,.file-row{animation:cogMsgIn var(--dur-base) var(--ease-soft)}
+  /* Slice 6: minimal cascade — scenario rows arrive left-to-right (40ms
+     steps, --i set by l3.js render(); backwards fill hides delayed rows). */
+  .scn-row{animation:cogMsgIn var(--dur-base) var(--ease-soft) backwards;animation-delay:calc(var(--i,0)*40ms)}
+}
+/* === UI_ISSUES.txt #2: top-bar stage flow + workspace ambient glow =====
+   Greenfield top bar: the workspace h2 heading is REPLACED by .topflow
+   (user/session id demoted to a muted left label, 7-marker stepper
+   centered). Marker states (grilling Q10): completed = solid fill in the
+   stage colour, current = fill + glowing ring/pulse, future = dashed
+   hollow circle + muted name. On stage change a --glow-coloured traveler
+   dot glides along the line from the previous marker to the new one
+   (Q3/Q4) on the --dur-slow token. "Cycle 2" chip (Q12) rides the
+   Sub-Headings marker for the whole phase-2 pass (container data-phase
+   drives it — pure CSS, no JS class wrangling). Dots-only under 900px
+   (Q13). Workspace glow: #graph::before wash + canvas under-content and
+   the drawer (grilling Q5 revised: sidebar and top bar stay neutral). */
+.topflow{display:flex;align-items:flex-start;gap:var(--sp-4);flex-shrink:0;margin:0 0 var(--sp-3) 0}
+.topflow-id{font-size:var(--fs-caption);color:var(--muted);padding-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
+.stage-flow{flex:1;min-width:0}
+.stp-track{display:flex;position:relative}
+.stp-step{flex:1;min-width:0;position:relative;text-align:center}
+/* connecting line: dot-center to dot-center, trimmed by dot radii (7px) */
+.stp-step + .stp-step::before{content:"";position:absolute;top:6px;height:2px;
+  left:calc(50% + 9px);right:calc(50% + 9px);
+  background:var(--line-soft);border-radius:1px}
+.stp-dot{display:block;width:14px;height:14px;margin:0 auto;border-radius:50%;box-sizing:border-box;
+  background:transparent;border:2px dashed var(--line-strong);
+  transition:background var(--dur-fast) var(--ease-soft),border-color var(--dur-fast) var(--ease-soft)}
+.stp-name{display:block;margin-top:5px;font-size:var(--fs-caption);color:var(--muted);line-height:1.15}
+.stp-step[data-stage="steps1-2"]{--stage-accent:var(--stage-steps)}
+.stp-step[data-stage="L1-2"]{--stage-accent:var(--stage-l12)}
+.stp-step[data-stage="L3"]{--stage-accent:var(--stage-l3)}
+.stp-step[data-stage="L4"]{--stage-accent:var(--stage-l4)}
+.stp-step[data-stage="L5"]{--stage-accent:var(--stage-l5)}
+.stp-step[data-stage="Phase2"],.stp-step[data-stage="done"]{--stage-accent:var(--stage-p2)}
+/* completed (visited in any cycle): solid fill in that stage's colour */
+.stp-step.stp-done .stp-dot{background:var(--stage-accent);border-color:var(--stage-accent)}
+.stp-step.stp-done .stp-name{color:var(--ink)}
+/* current: fill + glowing static ring; breathing pulse below (no-pref). */
+.stp-step.stp-now .stp-dot{background:var(--stage-accent);border-color:var(--stage-accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--stage-accent) 35%,transparent)}
+.stp-step.stp-now .stp-name{color:var(--ink);font-weight:700}
+/* Cyc-2 chip: reserved as inline element on the Phase2 step only. */
+.stp-chip{display:none;font-size:10px;font-weight:700;letter-spacing:.02em;color:var(--stage-p2);
+  border:1px solid var(--stage-p2);border-radius:999px;padding:0 6px;margin-top:4px}
+#stageFlow[data-phase="phase2"] .stp-step[data-stage="Phase2"] .stp-chip{display:inline-block}
+/* Traveler: the highlight that glides previous -> current marker. */
+.stp-traveler{position:absolute;left:0;top:0;width:10px;height:10px;border-radius:50%;
+  transform:translate(-50%,-50%);opacity:0;z-index:1;pointer-events:none;
+  transition:left var(--dur-slow) var(--ease-soft),top var(--dur-slow) var(--ease-soft),
+    background var(--dur-slow) var(--ease-soft),opacity var(--dur-fast) var(--ease-soft),
+    box-shadow var(--dur-slow) var(--ease-soft)}
+.stp-traveler.stp-set{opacity:1}
+.stp-traveler.stp-noanim{transition:none}
+@media (prefers-reduced-motion: no-preference){
+  @keyframes cogStageBreath{0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--stage-accent) 22%,transparent)}
+    50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--stage-accent) 45%,transparent)}}
+  .stp-step.stp-now .stp-dot{animation:cogStageBreath 1.8s ease-in-out infinite}
+}
+/* Q13: dots-only under 900px — names (and the chip) vanish natively. */
+@media (max-width:899px){
+  .stp-name{display:none}
+  #stageFlow[data-phase="phase2"] .stp-step[data-stage="Phase2"] .stp-chip{display:none}
+}
+/* Workspace-only ambient glow (grilling Q5-revised + Q6): one --glow var
+   (inline, set by stageflow.js from the --stage-* map) drives a soft wash
+   behind the canvas region + the drawer; sidebar/top bar get none.
+   Pre-L4 the wash shows over #graph (transparent, blurred edges); from L4
+   the opaque .graph-canvas covers the interior and only the blurred spill
+   reads — halo around the workspace middle. Fallback transparent keeps
+   other pages and pre-init zero-glow. Crossfades on background-color. */
+#graph::before{content:"";position:absolute;inset:-10px;border-radius:18px;z-index:-1;
+  background-color:color-mix(in srgb,var(--glow,transparent) 16%,transparent);
+  filter:blur(26px);pointer-events:none;
+  transition:background-color var(--dur-slow) var(--ease-soft)}

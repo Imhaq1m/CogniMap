@@ -18,8 +18,15 @@
 
   function paint(p) {
     if (!p) return;
-    el('l3progress').innerHTML = `Level 3 [Apply] ${p.pct}% (${p.cleared}/${p.total})` +
-      (p.complete ? ` <button class="btn sm green-inline" id="goL4">Continue to Level 4</button>` : '');
+    // UI_ISSUES.txt #1: the percentage now lives in the BAR meter pinned at
+    // the bottom of the left panel (meter.js); #l3progress keeps only the
+    // stage-complete Continue button.
+    try {
+      if (window.CogniMapMeter && window.CogniMapMeter.paint)
+        window.CogniMapMeter.paint('L3', { pct: p.pct, sub: p.cleared + '/' + p.total });
+    } catch (e) { /* meter optional */ }
+    el('l3progress').innerHTML = p.complete
+      ? `<button class="btn sm green-inline" id="goL4">Continue to Level 4</button>` : '';
     const b = el('goL4');
     if (b) b.onclick = () => el('l4modal').classList.add('open');
   }
@@ -41,9 +48,10 @@
     // to reveal — render the pool unchecked; tiers 1 (wrong) and 4
     // (omission) stay live.
     const pool = current.pool || [];
-    el('scnConcepts').innerHTML = `<b>Concepts</b>` + pool.map(cid => {
+    // MOTION.md slice 6: --i drives the 40ms left-to-right cascade (style.css).
+    el('scnConcepts').innerHTML = `<b>Concepts</b>` + pool.map((cid, i) => {
       const locked = (current.locked_passed || []).includes(cid);
-      return `<div class="scn-row${locked ? ' locked-green' : ''}" data-cid="${esc(cid)}">
+      return `<div class="scn-row${locked ? ' locked-green' : ''}" style="--i:${i}" data-cid="${esc(cid)}">
         <label><input type="checkbox" data-act="check" ${locked ? 'checked disabled' : ''}>
         ${esc(titles[cid] || cid)}${locked ? ' ✔' : ''}</label>
         <textarea data-act="just" rows="2" placeholder="Justification — why does it apply?" ${locked ? 'disabled' : ''}>${locked ? 'Locked green from earlier pass.' : ''}</textarea>

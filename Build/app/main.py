@@ -60,9 +60,122 @@ def _sv(name: str) -> str:
     return f"/static/{name}?v={mtime}"
 
 
+# Theme system (THEME.md): dark is the default; FIRST visit follows the OS
+# (prefers-color-scheme: light), any manual toggle wins and persists in
+# localStorage ('cognimap-theme'). Runs in <head> before the stylesheet so
+# the data-theme attribute is already set → zero theme flash on load.
+# The toggle button is appended into the page's .brand (all three pages
+# have one) — markup-free injection keeps page templates untouched.
+THEME_SCRIPT = """<script>(function(){
+var K='cognimap-theme',d=document.documentElement,t=null;
+try{t=localStorage.getItem(K)}catch(e){}
+if(t!=='light'&&t!=='dark'){
+  try{t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'}catch(e){t='dark'}
+}
+d.setAttribute('data-theme',t);
+function set(v){if(v!=='light'&&v!=='dark')return;d.setAttribute('data-theme',v);try{localStorage.setItem(K,v)}catch(e){}}
+function label(){return {dark:'Switch to light theme',light:'Switch to dark theme'}[d.getAttribute('data-theme')]||'Switch theme'}
+function glyph(){return {dark:'\\u2600',light:'\\u263e'}[d.getAttribute('data-theme')]||'\\u2600'}
+function paint(b){var m=label();b.textContent=glyph();b.title=m;b.setAttribute('aria-label',m)}
+function mount(){
+  var b=document.createElement('button');
+  b.type='button';b.className='theme-toggle';paint(b);
+  b.addEventListener('click',function(){set(d.getAttribute('data-theme')==='dark'?'light':'dark');paint(b)});
+  var brand=document.querySelector('.brand');
+  if(brand){brand.appendChild(b)}
+  else{b.classList.add('theme-toggle-float');document.body.appendChild(b)}
+}
+if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',mount)}else{mount()}
+window.CogniMapTheme={get:function(){return d.getAttribute('data-theme')},set:set};
+})();</script>"""
+
+
+# UI_ISSUES.txt #1 (stage percentages → BAR meter at the sidebar bottom):
+# server-side twin of static/meter.js so the pre-init sidebar already shows
+# the meter with real numbers for the stage the page opens on. Markup MUST
+# stay in sync with meter.js. Visible only for the percentage stages
+# (L1-2 / L3 / L5) — other stages render the hidden empty shell.
+_METER_ACCENT = {
+    "L1-2": "var(--stage-l12)",
+    "L3": "var(--stage-l3)",
+    "L5": "var(--stage-l5)",
+}
+
+
+def _meter_html(pct: float = 0, sub: str = "", accent: str = "var(--accent)",
+                hidden: bool = False, stage: str = "") -> str:
+    pct = max(0.0, min(100.0, float(pct or 0)))
+    shown = f"{pct:g}"  # int % from the API renders without trailing .0
+    cls = "cogmeter" + (" hidden" if hidden else "")
+    return (
+        f'<div id="stageMeter" class="{cls}" role="img" data-stage="{stage}" '
+        f'aria-label="Progress {shown}% of 100%" style="--stage-accent:{accent}">'
+        f'<div class="cm-bar"><div class="cm-fill" style="width:{shown}%"></div>'
+        f'<div class="cm-num">{shown}<i>%</i></div></div>'
+        + (f'<div class="cm-sub">{sub}</div>' if sub else "")
+        + "</div>"
+    )
+
+
+def _meter_for_stage(session_id: str, stage: str) -> str:
+    """Initial bottom panel meter for the CURRENT stage (fail-soft: any
+    status error leaves the 0% shell; meter.js repaints from API truth)."""
+    accent = _METER_ACCENT.get(stage or "")
+    if not accent:
+        return _meter_html(stage=stage or "", hidden=True)
+    pct, sub = 0, "0/0"
+    try:
+        if stage == "L1-2":
+            st = store.l12_status(session_id)
+            pct = st.get("pct", 0)
+            sub = f"{st.get('completed', 0)}/{st.get('total', 0)}"
+        elif stage == "L3":
+            st = store.l3_status(session_id)
+            pct = st.get("pct", 0)
+            sub = f"{st.get('cleared', 0)}/{st.get('total', 0)}"
+        elif stage == "L5":
+            st = store.l5_status(session_id)
+            if st.get("entered"):
+                if st.get("complete") and not st.get("n"):
+                    pct, sub = 100, "0/0 auto-pass"
+                else:
+                    pct = st.get("pct", 0)
+                    sub = f"{st.get('bright', 0)}/{st.get('n', 0)}"
+                    if st.get("complete") and st.get("n"):
+                        sub += " · complete"
+            else:
+                sub = f"0/{st.get('n', 0)}"
+    except Exception:  # fail-soft; meter.js repaints with API truth
+        pct, sub = 0, "0/0"
+    return _meter_html(pct, sub, accent, stage=stage)
+
+
 def _page_head() -> str:
-    return ("""<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">"""
+    return (f"{THEME_SCRIPT}"
+            """<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">"""
             f"""<link rel="stylesheet" href="{_sv('style.css')}">""")
+
+
+def _mode_badge() -> str:
+    """Launch-mode pill (grill 2026-10-29: COGNIMAP_MODE toggle visibility).
+
+    DEMO = stub engine forced via COGNIMAP_MODE=demo (keys ignored);
+    LIVE + model = auto mode with keys; STUB = auto mode, keyless.
+    Rendered per request so it always reflects the launch environment.
+    Inline styles: no stylesheet dependency, theme-agnostic.
+    """
+    pill = ("display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;"
+            "border-radius:999px;letter-spacing:.06em;vertical-align:middle;")
+    if config.is_demo_forced():
+        return (f' <span style="{pill}background:#7c3aed;color:#fff"'
+                ' title="COGNIMAP_MODE=demo: stub engine forced, keys ignored">DEMO</span>')
+    st = llm.llm_status()
+    if st.get("llm") == "live":
+        model = str(st.get("llm_model") or "")
+        return (f' <span style="{pill}background:#166534;color:#fff"'
+                f' title="live engine serving">LIVE · {model}</span>')
+    return (f' <span style="{pill}background:#57534c;color:#fff"'
+            ' title="auto mode, no keys: stub engine">STUB</span>')
 
 
 def _current_step() -> int:
@@ -138,7 +251,7 @@ def picker_page() -> str:
     # profile create + list live in the middle (.main, centered card like
     # normal sites), not the left panel. Sidebar keeps brand + helper only.
     return f"""<!doctype html><html><head>{_page_head()}<title>CogniMap</title></head><body>
-<div class="layout"><div class="sidebar"><div class="brand">CogniMap</div>
+<div class="layout"><div class="sidebar"><div class="brand">CogniMap{_mode_badge()}</div>
 <div class="card"><h3>Profile (lite name-pick, no auth)</h3>
 <p class="muted">Pick a profile in the middle to begin. No login — profiles are by name only.</p></div></div>
 <div class="main"><div style="max-width:560px;margin:32px auto">
@@ -211,6 +324,56 @@ refresh();
 </script></body></html>"""
 
 
+# UI_ISSUES.txt #2 (grilling Q9): one marker per stage, short existing
+# vocabulary: Materials · Level 1–2 · Level 3 · Level 4 · Level 5 ·
+# Sub-Headings · Done. Server renders the correct initial state (no flash
+# of wrong cards — same pattern as the sidebar gating), JS (stageflow.js)
+# keeps it true after every transition. States (grilling Q10): completed =
+# solid stage-colour fill, current = fill + glow ring, future = dashed
+# hollow. The "Cycle 2" chip rides the Sub-Headings marker (grilling Q12).
+_STAGE_FLOW = (
+    ("steps1-2", "Materials"),
+    ("L1-2", "Level 1–2"),
+    ("L3", "Level 3"),
+    ("L4", "Level 4"),
+    ("L5", "Level 5"),
+    ("Phase2", "Sub-Headings"),
+    ("done", "Done"),
+)
+
+
+def _stage_flow(user_id: int, session_id: str, stage: str, phase: str) -> str:
+    """Top-bar stage flow header (replaces the old workspace h2 heading)."""
+    stage = stage or "steps1-2"
+    phase = phase or "phase1"
+    order = [k for k, _ in _STAGE_FLOW]
+    ci = order.index(stage) if stage in order else 0
+    steps = []
+    for i, (key, label) in enumerate(_STAGE_FLOW):
+        # Visited inference (grilling Q11, mirrors stageflow.js): the phase-2
+        # pass replays the ladder — all mains-cycle stages + Phase2 itself
+        # stay filled; phase 1 fills strictly left of the current marker.
+        visited = (i <= 5) if phase == "phase2" else (i < ci)
+        if i == ci:
+            cls = "stp-step stp-now"
+        elif visited:
+            cls = "stp-step stp-done"
+        else:
+            cls = "stp-step"
+        chip = '<span class="stp-chip">Cycle 2</span>' if key == "Phase2" else ""
+        steps.append(
+            f'<div class="{cls}" data-stage="{key}" title="{label}">'
+            f'<span class="stp-dot"></span><span class="stp-name">{label}</span>{chip}</div>'
+        )
+    return (
+        '<header class="topflow">'
+        f'<span class="topflow-id">user #{user_id} · {session_id}</span>'
+        f'<div id="stageFlow" class="stage-flow" data-phase="{phase}" role="group" aria-label="Learning stage progress">'
+        f'<div class="stp-track"><div class="stp-traveler"></div>{"".join(steps)}</div>'
+        "</div></header>"
+    )
+
+
 def workspace_page(user_id: int, session_id: str) -> str:
     # UI_ISSUES.txt Problem 2: stage-gated sidebar — new session shows ONLY
     # Manage Materials + empty workspace; each stage appears one-at-a-time
@@ -218,14 +381,19 @@ def workspace_page(user_id: int, session_id: str) -> str:
     # (Q2-b). Manage Materials disappears after Confirm but file names stay
     # in the persistent Studying card (Q2-a). #state JSON hidden behind a
     # Debug toggle (Q2-c). Ids kept (progress/l3progress/l4card/l5card) so
-    # existing JS keeps working — visibility toggled via .hidden.
+    # existing JS keeps working — visibility toggled via .hidden. The old
+    # percentage slots (#progress/#l3progress/#l5progress) now keep only the
+    # stage-complete Continue buttons; the percentage lives in the shared
+    # BAR meter at the panel bottom (UI_ISSUES.txt #1).
     # Server renders the correct initial visibility per stage (no flash of
     # wrong cards); JS refreshSidebar() keeps it correct after transitions.
     try:
         _s = store.get_session(session_id)
         _stage = (_s or {}).get("stage") or "steps1-2"
+        _phase = (_s or {}).get("phase") or "phase1"
     except Exception:
         _stage = "steps1-2"
+        _phase = "phase1"
     _hid_mat = "" if _stage == "steps1-2" else " hidden"
     _hid_l12 = "" if _stage == "L1-2" else " hidden"
     _hid_l3 = "" if _stage == "L3" else " hidden"
@@ -236,7 +404,7 @@ def workspace_page(user_id: int, session_id: str) -> str:
     # an explicit Continue button gives a persistent reopen path after cancel.
     _hid_p2 = "" if _stage == "Phase2" else " hidden"
     return f"""<!doctype html><html><head>{_page_head()}<title>CogniMap workspace</title></head><body>
-<div class="layout workspace"><div class="sidebar"><div class="brand">CogniMap</div>
+<div class="layout workspace"><div class="sidebar"><div class="brand">CogniMap{_mode_badge()}</div>
 <div class="card{_hid_mat}" id="materialsCard"><h3>Manage Materials</h3>
 <button class="btn" id="selBtn">Select Files</button>
 <input type="file" id="filePick" accept=".pdf,.md,.txt" style="display:none">
@@ -245,10 +413,10 @@ def workspace_page(user_id: int, session_id: str) -> str:
 <div class="card" id="filesCard"><h3>Studying</h3>
 <div id="files"></div></div>
 <div class="card{_hid_l12}" id="l12card"><h3>Level 1 - 2 [Remember/Understand]</h3>
-<div id="progress">Level 1 - 2 [Remember/Understand] 0% (Step 2 slice wires real %)</div></div>
+<div id="progress"></div></div>
 <div class="card{_hid_l3}" id="l3card"><h3>Level 3 [Apply]</h3>
 <button class="btn purple" id="genBtn" disabled>Generate Scenario</button>
-<div id="l3progress">Level 3 [Apply] 0%</div></div>
+<div id="l3progress"></div></div>
 <div class="card{_hid_l4}" id="l4card"><h3>Level 4 [Analyze]</h3>
 <div id="l4rules"><ul><li>Each concept must have at least one connection</li><li>You may create up to 3 connections per concept</li><li>Select a relationship type for each connection (e.g., causes, depends on, leads to)</li><li>Focus on the most important relationships rather than connecting everything</li><li><b>How to link:</b> press + hold the <b>RIGHT</b> mouse button on a concept, drag to another concept, release. LEFT-drag only moves concepts. On touch screens, drag one concept onto another.</li></ul></div>
 <div id="l4warn" class="warn">Each concept needs 1-3 links (one link per pair — direction stored for probing). LEFT-drag moves concepts (never links); RIGHT-press-and-hold + drag creates links. You can delete/re-pick links, but can't add concepts.</div>
@@ -256,12 +424,16 @@ def workspace_page(user_id: int, session_id: str) -> str:
 <button class="btn green" id="finishBtn" disabled>Finish</button></div>
 <div class="card{_hid_l5}" id="l5card"><h3>Level 5 [Evaluate]</h3>
 <div id="l5warn" class="warn">Graph frozen for evaluation. Click dimmed links to defend them.</div>
-<div id="l5progress">Level 5 [Evaluate] 0%</div></div>
+<div id="l5progress"></div></div>
 <div class="card{_hid_p2}" id="phase2card"><h3>Sub-Headings Expansion</h3>
 <p class="muted">Conceptual overview complete — expand into sub-concepts when ready.</p>
 <button class="btn primary" id="phase2Btn">Continue to Sub-Headings</button></div>
+<!-- UI_ISSUES.txt #1: the stage percentage meter lives at the BOTTOM of the
+left panel (margin-top auto pins it; style.css). Server renders real numbers
+for the current stage via _meter_for_stage; meter.js repaints on every paint. -->
+{_meter_for_stage(session_id, _stage)}
 <p><a href="/u/{user_id}">← sessions</a></p></div>
-<div class="main"><h2>Workspace — user #{user_id} · {session_id}</h2>
+<div class="main">{_stage_flow(user_id, session_id, _stage, _phase)}
 <div id="graph">Graph canvas — mains render here after Confirm (Phase 1 mains-only)</div>
 <div id="edgePanel" class="hidden"><div class="modal-head"><h4 id="edgeTitle">Type of edges</h4><button class="btn sm" id="edgeCancel">x</button></div><div id="edgeSub" class="muted"></div><div id="edgeOpts"></div>
 <input type="text" id="edgeCustom" maxlength="24" placeholder="custom (1-24 chars, max 3 words)">
@@ -304,6 +476,9 @@ def workspace_page(user_id: int, session_id: str) -> str:
 <button class="btn primary" id="toL4Btn">Continue to Level 4</button>
 </div></div>
 <script src="{_sv('graph.js')}"></script>
+<!-- UI_ISSUES.txt #1: shared ring meter (used by l12/l3/l5 paint fns) must
+load BEFORE the modules that call CogniMapMeter.html during init(). -->
+<script src="{_sv('meter.js')}"></script>
 <script src="{_sv('steps12.js')}"></script>
 <script src="{_sv('l12.js')}"></script>
 <script src="{_sv('l3.js')}"></script>
@@ -311,6 +486,7 @@ def workspace_page(user_id: int, session_id: str) -> str:
 <script src="{_sv('l5.js')}"></script>
 <script src="{_sv('phase2.js')}"></script>
 <script src="{_sv('history.js')}"></script>
+<script src="{_sv('stageflow.js')}"></script>
 <div id="l3modal"><div class="modal-box">
 <h3>Level 1 - 2 Complete!</h3>
 <p>Core meanings secured. Welcome to <b>Level 3 - Apply</b>: face real-world scenarios and identify which concepts defend your reasoning.</p>
@@ -360,7 +536,7 @@ def workspace_page(user_id: int, session_id: str) -> str:
 </div></div>
 <!-- Problem 4: init runs AFTER all modal divs so trailing Continue/close bindings (l12guideContinue/toL3Btn/toL5Btn/probe/phase2/doneOk) exist at bind time. src tags stay above; only the init call moved to the end. -->
 <!-- m3 frozen post-Step 0 (no schema change): init order is steps12.init(user,session) vs l12/l3/l4/l5/phase2/history.init(session,user). Call sites match; do not unify. -->
-<script>CogniMapSteps12.init({user_id}, '{session_id}'); CogniMapL12.init('{session_id}', {user_id}); CogniMapL3.init('{session_id}', {user_id}); CogniMapL4.init('{session_id}', {user_id}); CogniMapL5.init('{session_id}', {user_id}); CogniMapPhase2.init('{session_id}', {user_id}); CogniMapHistory.init('{session_id}', {user_id});</script>
+<script>CogniMapSteps12.init({user_id}, '{session_id}'); CogniMapL12.init('{session_id}', {user_id}); CogniMapL3.init('{session_id}', {user_id}); CogniMapL4.init('{session_id}', {user_id}); CogniMapL5.init('{session_id}', {user_id}); CogniMapPhase2.init('{session_id}', {user_id}); CogniMapHistory.init('{session_id}', {user_id}); CogniMapStageFlow.init('{session_id}', {user_id});</script>
 </body></html>"""
 
 
@@ -391,9 +567,12 @@ def workspace(user_id: int, session_id: str):
 def health():
     # S1 additive: {step, llama: live|stub, llm: live|stub, llm_model}.
     # Frozen keys ok/step kept; extra keys allowed, required keys unchanged.
+    # Grill 2026-10-29: + data_mode (demo|auto) — tells demo-forced stubs
+    # apart from keyless stubs (both report stub above).
     out: dict = {"ok": True, "step": _current_step()}
     out.update(parse.parse_status())
     out.update(llm.llm_status())
+    out["data_mode"] = config.get_data_mode()
     return out
 
 
@@ -709,7 +888,12 @@ def api_extract(session_id: str, user_id: int | None = None):
                             "fallback_reason": parsed.get("fallback_reason", "")},
                  "mode": mode, "model": model}
     if mode == "stub":
-        out["warning"] = "Demo mode (stubbed) — connect keys for live parse/extract."
+        # Grill 2026-10-29: demo-forced wording drops the "connect keys"
+        # tail — keys exist in demo mode, so that advice would mislead.
+        if config.is_demo_forced():
+            out["warning"] = "Demo mode (stubbed) — parse/extract use the seed demo."
+        else:
+            out["warning"] = "Demo mode (stubbed) — connect keys for live parse/extract."
     return out
 
 

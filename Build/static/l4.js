@@ -6,19 +6,23 @@
 (function () {
   let SID = '', UID = 0, pendingFrom = null, pendingTo = null, cacheConcepts = [], cacheLinks = [], currentStage = '', selectedLinkId = null;
   const PRESETS = ["causes","leads to","depends on","includes","contrasts with","applied in","influences","consists of"];
-  // UI_ISSUES.txt Problem 1: every link type has its own color.
+  // UI_ISSUES.txt Problem 1: every link type has its own color. Colours are
+  // THEME.md CSS vars (dark + light overrides in style.css); the fallback
+  // hex in var() only shows if style.css fails to load. Arrowhead markers
+  // inject the same vars via inline fill styles so graphics re-skin without
+  // a JS repaint when the theme flips.
   const EDGE_COLORS = {
-    "causes": "#800000",         // maroon
-    "leads to": "#2563eb",       // blue
-    "depends on": "#16a34a",     // green
-    "includes": "#f97316",       // orange
-    "contrasts with": "#dc2626", // red
-    "applied in": "#1e3a8a",     // navy
-    "influences": "#9333ea",     // purple
-    "consists of": "#166534",    // dark green
+    "causes": "var(--edge-causes,#800000)",
+    "leads to": "var(--edge-leads-to,#2563eb)",
+    "depends on": "var(--edge-depends-on,#16a34a)",
+    "includes": "var(--edge-includes,#f97316)",
+    "contrasts with": "var(--edge-contrasts,#dc2626)",
+    "applied in": "var(--edge-applied-in,#1e3a8a)",
+    "influences": "var(--edge-influences,#9333ea)",
+    "consists of": "var(--edge-consists,#166534)",
   };
-  const CUSTOM_COLOR = "#9ca3af"; // grey (custom)
-  const DIMMED_BLUE = "#5a7fa6";  // dimmed blue (drag ghost arrow)
+  const CUSTOM_COLOR = "var(--edge-custom,#9ca3af)"; // grey (custom)
+  const DIMMED_BLUE = "var(--edge-ghost,#5a7fa6)";   // drag ghost arrow
   function edgeSlug(t) {
     return String(t ?? '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom';
   }
@@ -120,9 +124,10 @@
     };
   } catch (_e) { /* expose optional */ }
 
-  // Fluid animation helpers (snappy + precise): rAF smoothing for drag,
-  // FLIP glide for repaints/reset/revert. All disabled under
-  // prefers-reduced-motion (instant, as before).
+  // Fluid animation helpers (calm + precise, MOTION.md): rAF smoothing for
+  // drag, FLIP glide for repaints/reset/revert. Cursor-following drag stays
+  // exact (precision boundary); glides only retune toward --dur-base feel.
+  // All disabled under prefers-reduced-motion (instant, as before).
   function prefersReducedMotion() {
     try {
       return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -412,17 +417,17 @@
     }).join('');
     const svg = n
       ? `<svg id="graphSvg" viewBox="0 0 600 360" width="100%" height="100%" role="img" aria-label="concept graph">` +
-        `<defs><marker id="cogArrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#999"/></marker>` +
-        `<marker id="cogArrow-causes" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#800000"/></marker>` +
-        `<marker id="cogArrow-leads-to" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker>` +
-        `<marker id="cogArrow-depends-on" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#16a34a"/></marker>` +
-        `<marker id="cogArrow-includes" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#f97316"/></marker>` +
-        `<marker id="cogArrow-contrasts-with" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#dc2626"/></marker>` +
-        `<marker id="cogArrow-applied-in" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#1e3a8a"/></marker>` +
-        `<marker id="cogArrow-influences" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9333ea"/></marker>` +
-        `<marker id="cogArrow-consists-of" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#166534"/></marker>` +
-        `<marker id="cogArrow-custom" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9ca3af"/></marker>` +
-        `<marker id="cogArrowBlue" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5a7fa6"/></marker></defs>` +
+        `<defs><marker id="cogArrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-default,#999)"/></marker>` +
+        `<marker id="cogArrow-causes" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-causes,#800000)"/></marker>` +
+        `<marker id="cogArrow-leads-to" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-leads-to,#2563eb)"/></marker>` +
+        `<marker id="cogArrow-depends-on" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-depends-on,#16a34a)"/></marker>` +
+        `<marker id="cogArrow-includes" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-includes,#f97316)"/></marker>` +
+        `<marker id="cogArrow-contrasts-with" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-contrasts,#dc2626)"/></marker>` +
+        `<marker id="cogArrow-applied-in" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-applied-in,#1e3a8a)"/></marker>` +
+        `<marker id="cogArrow-influences" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-influences,#9333ea)"/></marker>` +
+        `<marker id="cogArrow-consists-of" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-consists,#166534)"/></marker>` +
+        `<marker id="cogArrow-custom" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-custom,#9ca3af)"/></marker>` +
+        `<marker id="cogArrowBlue" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" style="fill:var(--edge-ghost,#5a7fa6)"/></marker></defs>` +
         edgesSvg + nodesSvg + `</svg>` +
         `<div class="graph-controls"><button data-zoom="in" title="zoom in">+</button><button data-zoom="out" title="zoom out">−</button><button data-zoom="reset" title="reset view">⟲</button><button data-layout="reset" title="reset node layout">⌂</button></div>`
       : `<div class="graph-empty">No concepts yet</div>`;
@@ -446,8 +451,9 @@
     } catch (_e) { oldMap = null; }
     g.innerHTML = `<div class="graph-canvas">${svg}</div>`;
     bindNodes();
-    // Glide surviving nodes from old spots to new (200ms ease-out).
-    try { if (oldMap) flipGlide(oldMap, 200); } catch (_e) { /* glide optional */ }
+    // Glide surviving nodes from old spots to new (280ms soft ease-out,
+    // MOTION.md slice 5 retune).
+    try { if (oldMap) flipGlide(oldMap, 280); } catch (_e) { /* glide optional */ }
     // Problem 5: standard graph nav — background-drag pan + wheel zoom.
     // ViewBox-based (graph.js owns), node drag stays link (pan skips nodes).
     try {
@@ -775,7 +781,7 @@
     function revertGlide(id, fx, fy, tx, ty) {
       try {
         if (prefersReducedMotion()) { moveNodeLive(id, tx, ty); return; }
-        tweenNodeTo(id, fx, fy, tx, ty, 150);
+        tweenNodeTo(id, fx, fy, tx, ty, 220);
       } catch (_e) { /* revert optional */ }
     }
     // No native menu inside the canvas — right-drag is the link gesture.

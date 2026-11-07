@@ -49,6 +49,10 @@ Env names locked (Integration_Tracker; S2f purge -> S2g/S2g+ -> S2h chain):
   DEEPSEEK_BASE_URL (default https://api.deepseek.com)
   LLM_MODELS=mixed chain (default qwen/qwen3.8-27b,deepseek-flash; G3 free-first)
   LLAMA_TIER (agentic|agentic_plus, default agentic)
+  COGNIMAP_MODE (demo|auto, default auto — grill 2026-10-29: `demo`
+    forces the stub engine even when keys are present, so the supervisor
+    demo never needs keys or network; `auto` is today's key-detection
+    behaviour unchanged)
 S2h purge: LLM_PROVIDER is no longer honoured (chain routes by model id).
 
 Limits (S6, decided here so parse + routes share them):
@@ -160,7 +164,39 @@ def get_llama_tier() -> str:
     return "agentic"
 
 
+def get_data_mode() -> str:
+    """Run-mode selector (grill 2026-10-29: demo toggle).
+
+    `demo` forces the stub engine even when live keys are present (demo
+    presenting without keys/network); anything else (incl. unset) is `auto`
+    — today's key-detection behaviour, unchanged. Read live from the
+    environment (never a module constant) so tests can monkeypatch it and
+    a launch-time value always wins.
+    """
+    v = (os.environ.get("COGNIMAP_MODE") or "auto").strip().lower()
+    return "demo" if v == "demo" else "auto"
+
+
+def is_demo_forced() -> bool:
+    """True when COGNIMAP_MODE=demo pins the stub engine."""
+    return get_data_mode() == "demo"
+
+
+def stub_default_reason() -> str:
+    """Label for the default (keyless-or-forced) stub path.
+
+    Distinguishes demo-forced stubs from truly keyless ones in logs and
+    fallback_reason — a forced stub with keys present is not a missing-key
+    situation, so it must not say so.
+    """
+    if is_demo_forced():
+        return "demo-forced (COGNIMAP_MODE=demo)"
+    return "stub-default (no key on any chain link)"
+
+
 def is_llama_live() -> bool:
+    if is_demo_forced():
+        return False
     return bool(get_llama_key())
 
 
@@ -180,6 +216,8 @@ def get_llm_key(model: str) -> str | None:
 
 def is_llm_live() -> bool:
     """True when at least one chain link has its provider key configured."""
+    if is_demo_forced():
+        return False
     return any(get_llm_key(m) for m in get_llm_models())
 
 
@@ -188,8 +226,12 @@ def llm_status() -> dict:
 
     S2h mixed chain: llm_model reports the first KEYED link — the one a
     normal click would hit next (later paid links only fire after a
-    stumble). stub only when every link lacks a key.
+    stumble). stub only when every link lacks a key. Demo-forced mode
+    reports stub even with keys present (data_mode in /api/health tells
+    the two stub causes apart).
     """
+    if is_demo_forced():
+        return {"llm": "stub", "llm_model": "stub"}
     for model in get_llm_models():
         if get_llm_key(model):
             return {"llm": "live", "llm_model": model}
@@ -197,6 +239,8 @@ def llm_status() -> dict:
 
 
 def llama_status() -> dict:
+    if is_demo_forced():
+        return {"llama": "stub"}
     if is_llama_live():
         return {"llama": "live"}
     return {"llama": "stub"}

@@ -230,9 +230,15 @@
 
   function paintProgress(p) {
     if (!p) return;
-    const bar = el('progress');
-    bar.innerHTML = `Level 1 - 2 [Remember/Understand] ${p.pct}% (${p.completed}/${p.total})` +
-      (p.complete ? ` <button class="btn sm green-inline" id="goL3">Continue to Level 3</button>` : '');
+    // UI_ISSUES.txt #1: the percentage now lives in the BAR meter pinned at
+    // the bottom of the left panel (meter.js); #progress keeps only the
+    // stage-complete Continue button.
+    try {
+      if (window.CogniMapMeter && window.CogniMapMeter.paint)
+        window.CogniMapMeter.paint('L1-2', { pct: p.pct, sub: p.completed + '/' + p.total });
+    } catch (e) { /* meter optional */ }
+    el('progress').innerHTML = p.complete
+      ? `<button class="btn sm green-inline" id="goL3">Continue to Level 3</button>` : '';
     const b = el('goL3');
     if (b) b.onclick = () => {
       el('l3modal').classList.add('open');

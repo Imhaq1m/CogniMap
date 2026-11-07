@@ -94,6 +94,16 @@
     show('l4card', s === 'L4');
     show('l5card', s === 'L5');
     show('phase2card', s === 'Phase2');
+    // UI_ISSUES.txt #1: the bottom BAR meter follows the stage (visible only
+    // on the percentage stages L1-2/L3/L5 — accent swaps per stage in
+    // meter.js). This is the same chokepoint every transition funnels
+    // through; missing module stays a no-op.
+    try { if (window.CogniMapMeter && window.CogniMapMeter.sync) window.CogniMapMeter.sync(s); } catch (e) { /* meter optional */ }
+    // UI_ISSUES.txt #2: this is the chokepoint every stage change funnels
+    // through, so the top-bar stage flow re-syncs to SERVER truth here
+    // (some callers pass predicted stage values; stageflow.js re-fetches
+    // /state itself). Missing module (other pages) stays a no-op.
+    try { if (window.CogniMapStageFlow && window.CogniMapStageFlow.refresh) window.CogniMapStageFlow.refresh(); } catch (e) { /* stage flow optional */ }
   };
   // Q2-c: #state JSON hidden behind Debug toggle (still rendered for
   // troubleshooting, never user-visible by default).

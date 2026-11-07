@@ -294,10 +294,16 @@ def parse_pdf(file: str, pdf_bytes: bytes | None = None) -> dict:
         reason = f"pdf over {config.MAX_PDF_BYTES} bytes — stub fallback"
         log.warning("parse: %s", reason)
         return _with_mode(stub, "stub", reason)
-    # Keyless or label-only (frozen /upload + seed-load path): stub, no SDK import.
+    # Keyless, demo-forced, or label-only (frozen /upload + seed-load path):
+    # stub, no SDK import.
     if not config.is_llama_live() or pdf_bytes is None:
         stub = llamaparse_stub(label)
-        reason = "stub-default (no live key)" if not config.is_llama_live() else "stub (label-only, no bytes)"
+        if config.is_demo_forced():
+            reason = "demo-forced (COGNIMAP_MODE=demo)"
+        elif not config.is_llama_live():
+            reason = "stub-default (no live key)"
+        else:
+            reason = "stub (label-only, no bytes)"
         # llamaparse_stub already carries mode/fallback; normalise tier.
         stub["tier"] = tier
         stub["mode"] = "stub"

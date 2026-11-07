@@ -40,19 +40,26 @@
   }
 
   function paint(st) {
+    // UI_ISSUES.txt #1: the percentage now lives in the BAR meter pinned at
+    // the bottom of the left panel (meter.js — stage-gated to L5 by sync()).
     // Locks §5: pre-entry (entered==False) always 0%, never 100% (0/0).
     // Backend returns pct:0/complete:False pre-entry; gate here too so a
     // stale/cached payload can't false-positive Phase2 (TODO Step 5 DONE).
-    if (!st.entered) {
-      el('l5progress').textContent = `Level 5 [Evaluate] 0% (0/${st.n})`;
-      return;
+    if (!st) return;
+    let pct = 0, sub = `0/${st.n}`;
+    if (st.entered) {
+      if (st.complete && st.n === 0) {
+        // 0-link vacuous pass: full bar + auto-pass caption (was 100% (0/0)).
+        pct = 100; sub = '0/0 auto-pass';
+      } else {
+        pct = st.pct;
+        sub = `${st.bright}/${st.n}` + (st.complete && st.n > 0 ? ' · complete' : '');
+      }
     }
-    el('l5progress').textContent = `Level 5 [Evaluate] ${st.pct}% (${st.bright}/${st.n})`;
-    if (st.complete && st.n > 0) {
-      el('l5progress').textContent += ' · complete';
-    } else if (st.complete && st.n === 0) {
-      el('l5progress').textContent = 'Level 5 [Evaluate] 100% (0/0 auto-pass)';
-    }
+    try {
+      if (window.CogniMapMeter && window.CogniMapMeter.paint)
+        window.CogniMapMeter.paint('L5', { pct: pct, sub: sub });
+    } catch (e) { /* meter optional */ }
   }
 
   function dimGraph(st) {

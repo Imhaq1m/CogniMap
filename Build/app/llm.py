@@ -707,7 +707,7 @@ def extract_concepts_with_status(
     figs = list(figures or [])
     if not config.is_llm_live():
         concepts = _stub_extract_concepts(markdown, figs)
-        reason = "stub-default (no key on any chain link)"
+        reason = config.stub_default_reason()
         log.info("extract: mode=stub reason=%s", reason)
         return {"concepts": concepts, "mode": "stub", "model": "stub", "fallback_reason": reason}
     models = config.get_llm_models()
@@ -950,7 +950,7 @@ def evaluate_paraphrase_with_status(
 
     if not config.is_llm_live():
         evaluation = _stub_evaluate_paraphrase(c, text)
-        reason = "stub-default (no key on any chain link)"
+        reason = config.stub_default_reason()
         log.info("paraphrase: mode=stub reason=%s", reason)
         return {"evaluation": evaluation, "mode": "stub",
                 "model": "stub", "fallback_reason": reason}
@@ -1057,7 +1057,7 @@ def generate_scenario_with_status(
     _ = context_markdown  # frozen param; structured rows carry the live ground
     if not config.is_llm_live():
         scn = _generate_scenario_stub(chunk_ids, context_markdown)
-        reason = "stub-default (no key on any chain link)"
+        reason = config.stub_default_reason()
         log.info("l3 generate: mode=stub reason=%s", reason)
         return {"scenario": scn, "mode": "stub", "model": "stub",
                 "fallback_reason": reason}
@@ -1250,7 +1250,7 @@ def evaluate_scenario_with_status(
 
     if not config.is_llm_live():
         evaluation = _evaluate_scenario_stub(session_id, scenario_id, sels)
-        reason = "stub-default (no key on any chain link)"
+        reason = config.stub_default_reason()
         log.info("l3 submit: mode=stub reason=%s", reason)
         return {"evaluation": evaluation, "mode": "stub", "model": "stub",
                 "fallback_reason": reason}
@@ -1640,7 +1640,7 @@ def probe_link_with_status(
 
     if not config.is_llm_live():
         evaluation = _probe_link_stub(session_id, link_id, why_answer, fail_answer)
-        reason = "stub-default (no key on any chain link)"
+        reason = config.stub_default_reason()
         log.info("l5 probe: mode=stub reason=%s", reason)
         return {"evaluation": evaluation, "mode": "stub", "model": "stub",
                 "fallback_reason": reason}
