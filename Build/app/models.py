@@ -25,10 +25,12 @@ class Session(BaseModel):
     id: str
     user_id: int
     file: str = ""
+    name: str = ""
     created: str = ""
     # minimal state machine for skeleton; full transitions land in slices
     stage: str = "steps1-2"  # steps1-2 | L1-2 | L3 | L4 | L5 | Phase2 | done
     phase: str = "phase1"  # phase1 | phase2
+    iteration: int = 1  # continuous study (additive, default 1)
 
 
 class DiagramRef(BaseModel):
@@ -57,6 +59,7 @@ class Concept(BaseModel):
     pages: list[int] = Field(default_factory=list)
     diagram_refs: list[DiagramRef] = Field(default_factory=list)
     diagram_description: str = ""
+    iteration: int = 1  # continuous (additive)
 
     model_config = {"populate_by_name": True}
 
@@ -75,6 +78,7 @@ class Link(BaseModel):
     fail_answer: str = ""
     why_passed: bool = False
     fail_passed: bool = False
+    iteration: int = 1  # continuous (additive)
 
 
 class Scenario(BaseModel):
@@ -83,6 +87,7 @@ class Scenario(BaseModel):
     text: str = ""
     concept_ids: list[str] = Field(default_factory=list)
     cleared: bool = False
+    iteration: int = 1  # continuous (additive)
 
 
 class Trail(BaseModel):

@@ -241,6 +241,8 @@ html[data-theme="light"]{
 .theme-toggle-float{position:fixed;top:12px;right:12px;z-index:400}
 .card{background:var(--card);border-radius:14px;padding:var(--sp-4);box-shadow:var(--shadow-card)}
 .card h3{margin:0 0 var(--sp-2) 0;font-size:var(--fs-title)}
+/* Bloom's one-liners under each sidebar stage heading. */
+.sidebar .stage-desc{margin:0 0 var(--sp-2) 0;font-size:var(--fs-caption);line-height:1.4}
 /* Stage chrome (THEME.md): sidebar stage cards wear their Bloom stage
    colour as a 4px left border; the matching progress well inherits
    --stage-accent for its 3px border. Stage cards only — Studying/debug
@@ -277,7 +279,8 @@ html[data-theme="light"]{
    Fixed viewport-height chain gives flex:1 a definite height so the canvas
    grows/shrinks with the window instead of a fixed small box. */
 .layout.workspace{height:100vh;overflow:hidden}
-.layout.workspace .sidebar{height:100vh;overflow-y:auto;overflow-x:hidden;flex-shrink:0;display:flex;flex-direction:column} /* flex column + #stageMeter margin-top:auto = meter pinned at the panel bottom (UI_ISSUES.txt #1) */
+.layout.workspace .sidebar{height:100vh;overflow-y:auto;overflow-x:hidden;flex-shrink:0;display:flex;flex-direction:column;gap:var(--sp-3)} /* flex column + gap between cards + #stageMeter margin-top:auto = meter pinned at the panel bottom (UI_ISSUES.txt #1) */
+.layout.workspace .sidebar .brand{margin-bottom:0} /* gap owns the spacing now */
 .layout.workspace .main{height:100vh;overflow:hidden;box-sizing:border-box}
 .layout.workspace #edgePanel,.layout.workspace #debugCard{flex-shrink:0}
 .layout.workspace #debugCard{max-height:160px;overflow:auto}
@@ -349,6 +352,15 @@ input[type=text]:focus,textarea:focus,select:focus{outline:none;border-color:var
 .btn.sm{width:auto;padding:var(--sp-1) var(--sp-3);margin:0;font-size:var(--fs-caption)}
 .warn{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:8px;padding:var(--sp-2);margin:var(--sp-2) 0}
 .lock{background:var(--lock-bg);border:1px solid var(--lock-line);border-radius:8px;padding:var(--sp-2);margin:var(--sp-2) 0}
+/* Step 1 lock warning: centered popup overlay (above the concepts modal),
+   not an inline row at the bottom of the tree list. #lockBox keeps its id
+   so existing JS toggles keep working; .hidden owns visibility. */
+#lockBox.lock-overlay{position:fixed;inset:0;z-index:250;background:var(--backdrop);
+  display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+#lockBox.lock-overlay.hidden{display:none}
+#lockBox .lock-box{width:min(480px,94vw);background:var(--lock-bg);border:1px solid var(--lock-line)}
+#lockBox .lock-foot{display:flex;gap:10px;justify-content:flex-end}
+#lockBox .lock-foot .btn{width:auto;min-width:96px;margin:0;padding:8px 18px}
 .hidden{display:none}
 .tree-main{border:1px solid var(--line-strong);border-radius:8px;margin:var(--sp-2) 0;padding:var(--sp-2)}
 .tree-row{display:flex;align-items:center;gap:var(--sp-2);padding:5px var(--sp-1)}
@@ -566,7 +578,7 @@ textarea{width:100%;box-sizing:border-box;background:var(--field);color:var(--in
   #drawerFb > *,#scnMsg > *,#probeWhyFb > *,#probeFailFb > *,#probeMsg > *{animation:cogMsgIn var(--dur-base) var(--ease-soft)}
   /* Warn/lock boxes that un-hide dynamically (never the statically-visible
      l4warn/l5warn — a page-load animation there would read as noise). */
-  #warnBox:not(.hidden),#fileWarn:not(.hidden),#lockBox:not(.hidden),#addHeadingMsg:not(.hidden){animation:cogMsgIn var(--dur-base) var(--ease-soft)}
+  #warnBox:not(.hidden),#fileWarn:not(.hidden),#lockBox:not(.hidden) .lock-box,#addHeadingMsg:not(.hidden){animation:cogMsgIn var(--dur-base) var(--ease-soft)}
   /* List cards re-render on every stage/item switch — soft arrival each time. */
   .hist-card,.file-row{animation:cogMsgIn var(--dur-base) var(--ease-soft)}
   /* Slice 6: minimal cascade — scenario rows arrive left-to-right (40ms
@@ -644,3 +656,50 @@ textarea{width:100%;box-sizing:border-box;background:var(--field);color:var(--in
   background-color:color-mix(in srgb,var(--glow,transparent) 16%,transparent);
   filter:blur(26px);pointer-events:none;
   transition:background-color var(--dur-slow) var(--ease-soft)}
+/* === Print Study Pack (grilled Q1-Q14, browser print only) =================
+   Screen: pack hidden, preview modal is a plain .hidden-toggled overlay
+   (not part of the MOTION.md .open overlay system, to stay additive).
+   Print: only #printPack prints; app chrome + modals hidden. B&W-safe:
+   black on white, borders black, images grayscaled, meaning never
+   color-only (tags ●/○ carry state as text). */
+#printPack{display:none}
+#printmodal{position:fixed;inset:0;background:var(--backdrop);display:flex;align-items:center;justify-content:center;z-index:250;padding:16px;box-sizing:border-box}
+#printmodal.hidden{display:none}
+#printmodal .modal-box{width:min(480px,94vw)}
+#printPack .pp-runhead,#printPack .pp-runfoot{display:none}
+@media print{
+  @page{margin:14mm 12mm 16mm}
+  html,body{background:#fff !important;color:#000 !important;height:auto !important;min-height:0 !important;overflow:visible !important}
+  .layout,.layout.workspace{display:none !important}
+  #panel,#edgePanel,#edgeSelectedPanel,#modal,#lockBox,#scnmodal,#l4modal,#l3modal,
+  #l5modal,#probemodal,#phase2modal,#donemodal,#l12guide,#addHeadingModal,#printmodal,
+  #debugCard,.graph-controls,.theme-toggle,.topflow,#graph,.graph-canvas,.graph-empty{display:none !important}
+  #printPack{display:block !important;color:#000;background:#fff;font-size:11pt;line-height:1.4;
+    padding-top:10mm;padding-bottom:10mm}
+  #printPack:empty{display:none !important}
+  #printPack .pp-runhead{display:block;position:fixed;top:0;left:0;right:0;font-size:8pt;color:#000;
+    border-bottom:1px solid #000;padding:2mm 0;background:#fff;margin:0}
+  #printPack .pp-runfoot{display:block;position:fixed;bottom:0;left:0;right:0;font-size:8pt;color:#000;
+    border-top:1px solid #000;padding:2mm 0;background:#fff;margin:0}
+  #printPack h1{font-size:18pt;margin:2mm 0}
+  #printPack .pp-h2{font-size:13pt;margin:5mm 0 2mm;border-bottom:1px solid #000;padding-bottom:1mm;break-after:avoid}
+  #printPack .pp-cover-meta{font-size:9pt;margin:1mm 0}
+  #printPack .pp-legend,#printPack .pp-how{font-size:9pt;border:1px solid #000;border-radius:2mm;padding:2mm;margin:3mm 0}
+  #printPack .pp-label{font-weight:700;font-size:9pt;text-transform:uppercase;letter-spacing:.03em;margin:2mm 0 1mm}
+  #printPack .pp-concept{border:1px solid #000;border-radius:2mm;padding:3mm;margin:3mm 0;break-inside:avoid}
+  #printPack .pp-sub{border-top:1px dashed #000;margin-top:3mm;padding-top:2mm}
+  #printPack .pp-ctitle{font-size:12pt;margin:0 0 1mm}
+  #printPack .pp-sub-title{font-size:11pt}
+  #printPack .pp-tag{font-size:9pt;font-weight:400;border:1px solid #000;border-radius:2mm;padding:0 2mm;white-space:nowrap}
+  #printPack ul,#printPack ol{margin:1mm 0;padding-left:6mm}
+  #printPack li{margin:1mm 0}
+  #printPack .pp-def,#printPack .pp-words,#printPack .pp-used,#printPack .pp-links{margin:2mm 0}
+  #printPack .pp-mapimg svg{width:100%;height:auto;max-height:90mm;border:1px solid #000}
+  #printPack .pp-mapimg svg *{stroke:#000 !important;fill:none !important}
+  #printPack .pp-mapimg svg text,#printPack .pp-mapimg svg .node-label,#printPack .pp-mapimg svg .edge-label{fill:#000 !important;stroke:none !important}
+  #printPack img{max-width:60mm;max-height:45mm;filter:grayscale(100%)}
+  #printPack .pp-diag{margin:2mm 0;break-inside:avoid}
+  #printPack .pp-diag-cap,#printPack .pp-caption{font-size:8pt;font-style:italic}
+  #printPack .pp-foot{font-size:8pt;border-top:1px solid #000;margin-top:5mm;padding-top:2mm}
+  #printPack a{color:#000;text-decoration:none}
+}

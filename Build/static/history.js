@@ -91,6 +91,44 @@
     await ensureScenarios();
     await ensureLinks();
     let rows = trailCache.filter(t => t.stage === stage);
+    // Continuous Q10: payload carries iteration; filter to the relevant
+    // iteration — the clicked concept's iteration when known, else the
+    // session's current iteration. Pre-iteration rows default to 1.
+    try {
+      let filterIter = null;
+      if (currentConcept && conceptCache[currentConcept] && conceptCache[currentConcept].iteration) {
+        filterIter = parseInt(conceptCache[currentConcept].iteration, 10) || 1;
+      } else if (currentConcept) {
+        // Link click (L5): use the link's iteration when the concept lookup misses.
+        try {
+          const _lk = linkCache[currentConcept] || (await api('/api/sessions/' + SID + '/links' + q())).find(L => L.id === currentConcept);
+          if (_lk && _lk.iteration) filterIter = parseInt(_lk.iteration, 10) || 1;
+        } catch (_e) { /* fall through to session iteration */ }
+      }
+      if (!filterIter) {
+        try {
+          const _st = await api('/api/sessions/' + SID + '/state' + q());
+          filterIter = parseInt(((_st.session || {}).iteration || 1), 10) || 1;
+        } catch (_e) { filterIter = 1; }
+      }
+      if (filterIter) {
+        const _filtered = rows.filter(t => {
+          try {
+            const pay = JSON.parse(t.payload || '{}');
+            const pi = parseInt(pay.iteration || 1, 10) || 1;
+            return pi === filterIter;
+          } catch (_e) { return filterIter === 1; }
+        });
+        // Keep the filtered view when it has rows; otherwise fall back to all
+        // (e.g. old concept clicked but its rows predate iteration tagging).
+        if (_filtered.length || rows.length) {
+          // Only narrow when the concept maps to an iteration; an empty
+          // filtered set with non-empty unfiltered means no history for this
+          // iteration — show "No history yet" (honest), don't leak old rows.
+          rows = _filtered;
+        }
+      }
+    } catch (_e) { /* iteration filter optional */ }
     // Concept-panel query: filter by current concept when known.
     if (currentConcept && (stage === 'L3' || stage === 'L1-2')) {
       const mine = rows.filter(t => t.concept_id === currentConcept);

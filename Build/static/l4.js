@@ -349,7 +349,15 @@
     // click-to-select popup (no link list).
     const counted = new Set(st.counted || []);
     const phase = st.phase || 'phase1';
-    const visible = phase === 'phase1' ? concepts.filter(c => counted.has(c.id)) : concepts;
+    // Continuous: old iterations stay frozen display-only (never disappear on
+    // Continue). Phase-1 still hides *current* subs, but old-iteration rows
+    // (any kind) remain visible as background so the previous map stays.
+    // counted = current-iteration pool only; display = counted + old.
+    const curIter = parseInt(st.iteration || 1, 10) || 1;
+    const iterOf = (c) => { try { return parseInt(c.iteration || 1, 10) || 1; } catch (_e) { return 1; } };
+    const visible = phase === 'phase1'
+      ? concepts.filter(c => counted.has(c.id) || iterOf(c) < curIter)
+      : concepts;
     const n = visible.length;
     const CX = 300, CY = 168, R = n <= 1 ? 0 : Math.min(200, 52 + 20 * n);
     // UI_ISSUES.txt Problem 1 (free move): circular layout is the DEFAULT;
@@ -400,7 +408,11 @@
     }).join('');
     const nodesSvg = visible.map(c => {
       const p = pos[c.id];
-      const dim = (phase !== 'phase1' && c.kind === 'main') ? ' dimmed' : '';
+      // Frozen cue: Phase-2 mains dimmed (existing) + continuous old-iteration
+      // nodes dimmed in any phase so the previous map reads as background.
+      // Still clickable: L4 allows new↔old links; drawer shows history-only.
+      const isOld = iterOf(c) < curIter;
+      const dim = ((phase !== 'phase1' && c.kind === 'main') || isOld) ? ' dimmed' : '';
       const blue = c.source === 'user_added' ? ' blue' : '';
       const short = c.title.length > 18 ? c.title.slice(0, 17) + '…' : c.title;
       // Problem 1: only L4 nodes carry data-l4node (drag-link handle).
@@ -1079,7 +1091,7 @@
       const degs = st.degrees || {};
       el('l4status').textContent = `Level 4 links: ${(st.links || []).length} · ` +
         (st.counted || []).map(id => `${title(id)}:${degs[id] || 0}`).join(' ') +
-        (st.finish_enabled ? ' · Finish enabled' : ' · need ≥1 per concept, max 3');
+        (st.finish_enabled ? ' · Finish enabled' : ' · need ≥1 per concept (~3 recommended)') + ((st.over_recommended && st.over_recommended.length) ? ' · over recommended: ' + st.over_recommended.join(', ') : '');
     }
     el('finishBtn').disabled = !st.finish_enabled;
   }

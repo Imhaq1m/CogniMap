@@ -83,7 +83,16 @@
       }
     } catch (e) { /* fall through to fallback */ }
     // store rows use lowercase keys: kind/title/source
-    const list = (concepts || []).filter(c => c.kind === 'main');
+    // Continuous: frozen old iterations stay visible even in fallback.
+    // Mains + any old-iteration row (old subs included as frozen background).
+    let maxIter = 1;
+    try {
+      (concepts || []).forEach(c => {
+        const v = parseInt(c.iteration || 1, 10) || 1;
+        if (v > maxIter) maxIter = v;
+      });
+    } catch (_e) { maxIter = 1; }
+    const list = (concepts || []).filter(c => c.kind === 'main' || ((() => { try { return (parseInt(c.iteration || 1, 10) || 1) < maxIter; } catch (_e) { return false; } })()));
     const g = el('graph');
     if (!list.length) { g.textContent = 'Graph canvas — mains render here after Confirm (Phase 1 mains-only)'; return; }
     g.innerHTML = '<div class="graph-nodes">' + list.map(c =>
@@ -351,8 +360,21 @@
       }
       el('warnBox').classList.add('hidden');
       el('lockBox').classList.remove('hidden');
+      try { el('lockConfirm').focus(); } catch (e) { /* focus optional */ }
     };
     el('lockBack').onclick = () => el('lockBox').classList.add('hidden');
+    // Centered popup dismiss: backdrop click + Escape behave like Back.
+    el('lockBox').onclick = (e) => { if (e.target === el('lockBox')) el('lockBox').classList.add('hidden'); };
+    if (!document._cognimapLockEscBound) {
+      document._cognimapLockEscBound = true;
+      document.addEventListener('keydown', (e) => {
+        try {
+          if (e.key === 'Escape' && el('lockBox') && !el('lockBox').classList.contains('hidden')) {
+            el('lockBox').classList.add('hidden');
+          }
+        } catch (_e) { /* dismiss optional */ }
+      });
+    }
     // Problem 4: Continue only closes (Q4-a, no refresh). Robust binding so it
     // always closes even if init ever runs before #l12guide parses (old order):
     // direct bind + DOMContentLoaded retry + delegated fallback + re-bind on show.

@@ -42,17 +42,20 @@ def init_db() -> None:
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             file TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL DEFAULT '',
             created TEXT NOT NULL,
             stage TEXT NOT NULL DEFAULT 'steps1-2',
             phase TEXT NOT NULL DEFAULT 'phase1',
             l5_n INTEGER,
-            l5_phase TEXT NOT NULL DEFAULT ''
+            l5_phase TEXT NOT NULL DEFAULT '',
+            iteration INTEGER NOT NULL DEFAULT 1
         );
         CREATE TABLE IF NOT EXISTS session_files (
             session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
             filename TEXT NOT NULL,
             created TEXT NOT NULL,
-            PRIMARY KEY (session_id, filename)
+            iteration INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (session_id, filename, iteration)
         );
         CREATE TABLE IF NOT EXISTS concepts (
             id TEXT NOT NULL,
@@ -67,6 +70,7 @@ def init_db() -> None:
             pages TEXT NOT NULL DEFAULT '[]',
             diagram_refs TEXT NOT NULL DEFAULT '[]',
             diagram_description TEXT NOT NULL DEFAULT '',
+            iteration INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (session_id, id)
         );
         CREATE TABLE IF NOT EXISTS links (
@@ -81,6 +85,7 @@ def init_db() -> None:
             why_passed INTEGER NOT NULL DEFAULT 0,
             fail_passed INTEGER NOT NULL DEFAULT 0,
             phase TEXT NOT NULL DEFAULT 'phase1',
+            iteration INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (session_id, id)
         );
         CREATE TABLE IF NOT EXISTS scenarios (
@@ -89,6 +94,7 @@ def init_db() -> None:
             text TEXT NOT NULL DEFAULT '',
             concept_ids TEXT NOT NULL DEFAULT '[]',
             cleared INTEGER NOT NULL DEFAULT 0,
+            iteration INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (session_id, id)
         );
         CREATE TABLE IF NOT EXISTS trail (
@@ -164,6 +170,63 @@ def init_db() -> None:
             con.commit()
     except Exception:
         pass
+    # Workspace rename (additive): sessions.name display label, independent
+    # of sessions.file / session_files (file labels stay upload truth).
+    # Fresh DBs get it from CREATE TABLE above; existing DBs ALTER here.
+    # Backfill: name defaults to the primary file label where empty.
+    try:
+        _scols3 = {rr[1] for rr in con.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "name" not in _scols3:
+            con.execute("ALTER TABLE sessions ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+            con.commit()
+    except Exception:
+        pass
+    try:
+        con.execute("UPDATE sessions SET name = file WHERE name IS NULL OR name = ''")
+        con.commit()
+    except Exception:
+        pass
+    # Continuous study (iteration) migration: additive iteration col DEFAULT 1
+    # on sessions/concepts/links/scenarios/session_files. Fresh DBs get it from
+    # CREATE TABLE above; existing DBs ALTER here. Old rows default to 1.
+    for _tbl in ("sessions", "concepts", "links", "scenarios", "session_files"):
+        try:
+            _ccols = {r[1] for r in con.execute(f"PRAGMA table_info({_tbl})").fetchall()}
+            if "iteration" not in _ccols:
+                if _tbl == "session_files":
+                    con.execute(f"ALTER TABLE {_tbl} ADD COLUMN iteration INTEGER NOT NULL DEFAULT 1")
+                else:
+                    con.execute(f"ALTER TABLE {_tbl} ADD COLUMN iteration INTEGER NOT NULL DEFAULT 1")
+                con.commit()
+        except Exception:
+            pass
+    # session_files PK migration: old PK (session_id, filename) -> new
+    # (session_id, filename, iteration) so the same filename can recur in a
+    # later iteration. Rebuild only when needed (fresh DBs already have it).
+    try:
+        _sql_row = con.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='session_files'"
+        ).fetchone()
+        _sql = (_sql_row[0] if _sql_row and _sql_row[0] else "") or ""
+        if "PRIMARY KEY (session_id, filename)" in _sql:
+            con.execute(
+                """CREATE TABLE IF NOT EXISTS session_files_new (
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    filename TEXT NOT NULL,
+                    created TEXT NOT NULL,
+                    iteration INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (session_id, filename, iteration)
+                )"""
+            )
+            con.execute(
+                """INSERT OR IGNORE INTO session_files_new (session_id, filename, created, iteration)
+                   SELECT session_id, filename, created, COALESCE(iteration, 1) FROM session_files"""
+            )
+            con.execute("DROP TABLE session_files")
+            con.execute("ALTER TABLE session_files_new RENAME TO session_files")
+            con.commit()
+    except Exception:
+        pass
     con.close()
 
 
@@ -196,19 +259,34 @@ def list_users() -> list[dict]:
 
 # ---- sessions ----
 
-def create_session(user_id: int, file: str = "") -> dict:
+def create_session(user_id: int, file: str = "", name: str = "") -> dict:
     sid = "s-" + uuid.uuid4().hex[:8]
     now = _now()
+    label = (file or "").strip()
+    # Workspace display name: explicit name wins, else fall back to the
+    # primary file label (keeps old sessions readable); rename edits only
+    # this column, never file/session_files.
+    display = (name or "").strip() or label or ""
     con = connect()
-    con.execute(
-        "INSERT INTO sessions (id, user_id, file, created, stage, phase) VALUES (?,?,?,?,?,?)",
-        (sid, user_id, file or "", now, "steps1-2", "phase1"),
-    )
-    if (file or "").strip():
+    try:
+        _has_name = "name" in {r[1] for r in con.execute("PRAGMA table_info(sessions)").fetchall()}
+    except Exception:
+        _has_name = False
+    if _has_name:
+        con.execute(
+            "INSERT INTO sessions (id, user_id, file, name, created, stage, phase) VALUES (?,?,?,?,?,?,?)",
+            (sid, user_id, label, display, now, "steps1-2", "phase1"),
+        )
+    else:
+        con.execute(
+            "INSERT INTO sessions (id, user_id, file, created, stage, phase) VALUES (?,?,?,?,?,?)",
+            (sid, user_id, label, now, "steps1-2", "phase1"),
+        )
+    if label:
         con.execute(
             "INSERT OR IGNORE INTO session_files (session_id, filename, created)"
             " VALUES (?,?,?)",
-            (sid, (file or "").strip(), now),
+            (sid, label, now),
         )
     con.commit()
     row = con.execute("SELECT * FROM sessions WHERE id = ?", (sid,)).fetchone()
@@ -232,6 +310,29 @@ def get_session(session_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_iteration(session_id: str) -> int:
+    """Current continuation iteration (additive, default 1 for pre-migration rows)."""
+    try:
+        s = get_session(session_id)
+        if not s:
+            return 1
+        try:
+            v = int(s.get("iteration") or 1)
+        except (TypeError, ValueError):
+            return 1
+        return v if v >= 1 else 1
+    except Exception:
+        return 1
+
+
+def _row_iteration(row: dict) -> int:
+    try:
+        v = int((row or {}).get("iteration") or 1)
+    except (TypeError, ValueError):
+        return 1
+    return v if v >= 1 else 1
+
+
 def require_owned_session(session_id: str, user_id: int | None) -> dict:
     """Ownership gate (Locks §0+§8): sessions.user_id MUST equal requesting user.
 
@@ -253,17 +354,52 @@ def require_owned_session(session_id: str, user_id: int | None) -> dict:
     return s
 
 
+def rename_session(session_id: str, user_id: int | None, name: str) -> dict:
+    """Rename workspace (additive): updates sessions.name only.
+
+    Ownership (§0+§8): verifies sessions.user_id == user_id first (never
+    session_id alone). Validation: 1-100 chars after trim, single line
+    (no newlines). File labels / session_files untouched, so uploads and
+    concept extraction keep working after a rename.
+    """
+    require_owned_session(session_id, user_id)
+    display = (name or "").strip()
+    if not display:
+        raise ValueError("workspace name required")
+    if "\n" in display or "\r" in display:
+        raise ValueError("workspace name must be a single line")
+    if len(display) > 100:
+        raise ValueError("workspace name max 100 chars")
+    con = connect()
+    con.execute("UPDATE sessions SET name = ? WHERE id = ?", (display, session_id))
+    con.commit()
+    row = con.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    con.close()
+    return dict(row) if row else {}
+
+
 # ---- session files (Locks §0 file list + §6 reset cascade) ----
 
 def list_files(session_id: str) -> list[dict]:
     con = connect()
     try:
+        # Iteration-aware: SELECT * so iteration rides along (default 1 for old rows).
         rows = con.execute(
-            "SELECT session_id, filename, created FROM session_files"
-            " WHERE session_id = ? ORDER BY created, filename",
+            "SELECT * FROM session_files"
+            " WHERE session_id = ? ORDER BY iteration, created, filename",
             (session_id,),
         ).fetchall()
-        out = [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            if "iteration" not in d or d.get("iteration") is None:
+                d["iteration"] = 1
+            else:
+                try:
+                    d["iteration"] = int(d["iteration"] or 1)
+                except (TypeError, ValueError):
+                    d["iteration"] = 1
+            out.append(d)
         con.close()
         return out
     except Exception:
@@ -273,22 +409,65 @@ def list_files(session_id: str) -> list[dict]:
         finally:
             con.close()
         if row and (row["file"] or "").strip():
-            return [{"session_id": session_id, "filename": row["file"], "created": ""}]
+            return [{"session_id": session_id, "filename": row["file"], "created": "", "iteration": 1}]
         return []
 
 
+def list_current_files(session_id: str) -> list[dict]:
+    """Files for the current iteration only (new material for extract)."""
+    cur = get_iteration(session_id)
+    return [f for f in list_files(session_id) if _row_iteration(f) == cur]
+
+
 def add_file(session_id: str, filename: str) -> dict:
-    """Upload path: insert session_files row; sessions.file mirrors primary."""
+    """Upload path: insert session_files row tagged with current iteration; sessions.file mirrors primary."""
     label = (filename or "").strip() or "seed-demo.pdf"
+    cur = get_iteration(session_id)
+    now = _now()
     con = connect()
-    con.execute(
-        "INSERT OR IGNORE INTO session_files (session_id, filename, created)"
-        " VALUES (?,?,?)",
-        (session_id, label, _now()),
-    )
-    row = con.execute("SELECT file FROM sessions WHERE id = ?", (session_id,)).fetchone()
-    if row is not None and not (row["file"] or "").strip():
-        con.execute("UPDATE sessions SET file = ? WHERE id = ?", (label, session_id))
+    try:
+        has_iter = "iteration" in {r[1] for r in con.execute("PRAGMA table_info(session_files)").fetchall()}
+    except Exception:
+        has_iter = False
+    try:
+        if has_iter:
+            con.execute(
+                "INSERT OR IGNORE INTO session_files (session_id, filename, created, iteration)"
+                " VALUES (?,?,?,?)",
+                (session_id, label, now, cur),
+            )
+            # Same filename re-uploaded in a later iteration: retag to current
+            # so extract picks it up as new material (PK includes iteration on
+            # fresh DBs; on migrated old-PK DBs the row already exists).
+            try:
+                con.execute(
+                    "UPDATE session_files SET iteration = ?, created = ? WHERE session_id = ? AND filename = ?",
+                    (cur, now, session_id, label),
+                )
+            except Exception:
+                pass
+        else:
+            con.execute(
+                "INSERT OR IGNORE INTO session_files (session_id, filename, created)"
+                " VALUES (?,?,?)",
+                (session_id, label, now),
+            )
+    except Exception:
+        # Old-PK DB where (sid, filename) already exists in another iteration:
+        # fall back to an UPDATE retag so the file counts as current material.
+        try:
+            con.execute(
+                "UPDATE session_files SET created = ? WHERE session_id = ? AND filename = ?",
+                (now, session_id, label),
+            )
+        except Exception:
+            pass
+    try:
+        row = con.execute("SELECT file FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if row is not None and not (row["file"] or "").strip():
+            con.execute("UPDATE sessions SET file = ? WHERE id = ?", (label, session_id))
+    except Exception:
+        pass
     con.commit()
     out = con.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
     con.close()
@@ -297,20 +476,24 @@ def add_file(session_id: str, filename: str) -> dict:
 
 def remove_file(session_id: str, filename: str | None = None,
                 user_id: int | None = None) -> dict:
-    """Per-file remove (Locks §6): delete one session_files row, keep data while
-    files remain; removing the last file invokes clear_session_data (full wipe
-    + sessions.file cleared + stage/phase reset). Returns
-    {"session": ..., "files": [...], "reset": bool}.
+    """Per-file remove (Locks §6 + continuous Q11): delete one session_files row,
+    keep data while files remain; removing the last file invokes clear_session_data
+    (full wipe + sessions.file cleared + stage/phase reset) — EXCEPT once
+    iteration>1, when file remove never wipes (only row + disk bytes).
 
     Ownership (§0+§8, anti-IDOR): verifies sessions.user_id == user_id first
     (never session_id alone) — mirrors delete_session. user_id=None fails
     closed. Destructive when it wipes, so store-level gate, not route-only.
     """
     require_owned_session(session_id, user_id)
+    cur_iter = get_iteration(session_id)
     files = list_files(session_id)
     if not files:
         # Nothing tracked (legacy single-label session): full reset preserves
-        # old behaviour for callers that never uploaded via session_files.
+        # old behaviour for callers that never uploaded via session_files —
+        # unless already continued (never wipe a continued workspace).
+        if cur_iter > 1:
+            return {"session": get_session(session_id), "files": [], "reset": False}
         cleared = clear_session_data(session_id, user_id)
         return {"session": cleared, "files": [], "reset": True}
     target = (filename or "").strip() if filename else None
@@ -319,10 +502,31 @@ def remove_file(session_id: str, filename: str | None = None,
         s = get_session(session_id)
         target = ((s or {}).get("file") or "").strip() or files[0]["filename"]
     con = connect()
-    con.execute(
-        "DELETE FROM session_files WHERE session_id = ? AND filename = ?",
-        (session_id, target),
-    )
+    try:
+        # Delete the current-iteration row when present, else any matching row
+        # (old-PK DBs with a single row per filename).
+        cur_rows = con.execute(
+            "SELECT filename FROM session_files WHERE session_id = ? AND filename = ? AND iteration = ?",
+            (session_id, target, cur_iter),
+        ).fetchall()
+        if cur_rows:
+            con.execute(
+                "DELETE FROM session_files WHERE session_id = ? AND filename = ? AND iteration = ?",
+                (session_id, target, cur_iter),
+            )
+        else:
+            con.execute(
+                "DELETE FROM session_files WHERE session_id = ? AND filename = ?",
+                (session_id, target),
+            )
+    except Exception:
+        try:
+            con.execute(
+                "DELETE FROM session_files WHERE session_id = ? AND filename = ?",
+                (session_id, target),
+            )
+        except Exception:
+            pass
     con.commit()
     con.close()
     remaining = list_files(session_id)
@@ -335,6 +539,16 @@ def remove_file(session_id: str, filename: str | None = None,
         con.commit()
         con.close()
         return {"session": get_session(session_id), "files": remaining, "reset": False}
+    # No files left: iteration>1 never wipes (Q11) — keep the learned map intact.
+    if cur_iter > 1:
+        con = connect()
+        try:
+            con.execute("UPDATE sessions SET file = '' WHERE id = ?", (session_id,))
+            con.commit()
+        except Exception:
+            pass
+        con.close()
+        return {"session": get_session(session_id), "files": [], "reset": False}
     cleared = clear_session_data(session_id, user_id)
     return {"session": cleared, "files": [], "reset": True}
 
@@ -352,8 +566,22 @@ def list_concepts(session_id: str) -> list[dict]:
         d = dict(r)
         d["pages"] = json.loads(d.get("pages") or "[]")
         d["diagram_refs"] = json.loads(d.get("diagram_refs") or "[]")
+        # Iteration default for pre-migration rows.
+        if "iteration" not in d or d.get("iteration") is None:
+            d["iteration"] = 1
+        else:
+            try:
+                d["iteration"] = int(d["iteration"] or 1)
+            except (TypeError, ValueError):
+                d["iteration"] = 1
         out.append(d)
     return out
+
+
+def list_current_concepts(session_id: str) -> list[dict]:
+    """Concepts for the current iteration only (new material pool)."""
+    cur = get_iteration(session_id)
+    return [c for c in list_concepts(session_id) if _row_iteration(c) == cur]
 
 
 def list_links(session_id: str) -> list[dict]:
@@ -374,8 +602,21 @@ def list_links(session_id: str) -> list[dict]:
         d["fail_passed"] = bool(d.get("fail_passed"))
         if "phase" not in d or not d.get("phase"):
             d["phase"] = "phase1"
+        if "iteration" not in d or d.get("iteration") is None:
+            d["iteration"] = 1
+        else:
+            try:
+                d["iteration"] = int(d["iteration"] or 1)
+            except (TypeError, ValueError):
+                d["iteration"] = 1
         out.append(d)
     return out
+
+
+def list_current_links(session_id: str) -> list[dict]:
+    """Links created in the current iteration (the only L4/L5 pool)."""
+    cur = get_iteration(session_id)
+    return [L for L in list_links(session_id) if _row_iteration(L) == cur]
 
 
 def list_scenarios(session_id: str) -> list[dict]:
@@ -389,6 +630,13 @@ def list_scenarios(session_id: str) -> list[dict]:
         d = dict(r)
         d["concept_ids"] = json.loads(d.get("concept_ids") or "[]")
         d["cleared"] = bool(d.get("cleared"))
+        if "iteration" not in d or d.get("iteration") is None:
+            d["iteration"] = 1
+        else:
+            try:
+                d["iteration"] = int(d["iteration"] or 1)
+            except (TypeError, ValueError):
+                d["iteration"] = 1
         out.append(d)
     return out
 
@@ -437,14 +685,62 @@ def clear_session_data(session_id: str, user_id: int | None = None) -> dict | No
         con.execute("DELETE FROM session_files WHERE session_id = ?", (session_id,))
     except Exception:
         pass
-    con.execute(
-        "UPDATE sessions SET file = '', stage = 'steps1-2', phase = 'phase1', l5_n = NULL, l5_phase = '' WHERE id = ?",
-        (session_id,),
-    )
+    try:
+        has_iter = "iteration" in {r[1] for r in con.execute("PRAGMA table_info(sessions)").fetchall()}
+    except Exception:
+        has_iter = False
+    if has_iter:
+        con.execute(
+            "UPDATE sessions SET file = '', stage = 'steps1-2', phase = 'phase1', l5_n = NULL, l5_phase = '', iteration = 1 WHERE id = ?",
+            (session_id,),
+        )
+    else:
+        con.execute(
+            "UPDATE sessions SET file = '', stage = 'steps1-2', phase = 'phase1', l5_n = NULL, l5_phase = '' WHERE id = ?",
+            (session_id,),
+        )
     con.commit()
     row = con.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
     con.close()
     return dict(row) if row else None
+
+
+def continue_session(session_id: str, user_id: int | None = None) -> dict:
+    """Continuous study (Q5/Q8/Q12): done → steps1-2 for a new iteration.
+
+    Gates: stage must be done (Phase 2 L5 100% final map). Preserves all old
+    concepts/links/scenarios/trail frozen; bumps sessions.iteration, resets
+    stage to steps1-2, phase to phase1, clears l5_n/l5_phase so the next loop
+    re-fixes N. Unlimited iterations; each needs ≥1 new main at Confirm.
+    """
+    require_owned_session(session_id, user_id)
+    s = get_session(session_id)
+    if not s:
+        raise KeyError("no such session")
+    if (s.get("stage") or "") != "done":
+        raise ValueError("Continue available only on finished workspaces (done)")
+    cur = get_iteration(session_id)
+    nxt = cur + 1
+    con = connect()
+    try:
+        has_iter = "iteration" in {r[1] for r in con.execute("PRAGMA table_info(sessions)").fetchall()}
+    except Exception:
+        has_iter = False
+    if has_iter:
+        con.execute(
+            "UPDATE sessions SET iteration = ?, stage = 'steps1-2', phase = 'phase1', l5_n = NULL, l5_phase = '' WHERE id = ?",
+            (nxt, session_id),
+        )
+    else:
+        con.execute(
+            "UPDATE sessions SET stage = 'steps1-2', phase = 'phase1', l5_n = NULL, l5_phase = '' WHERE id = ?",
+            (session_id,),
+        )
+        nxt = 1
+    con.commit()
+    con.close()
+    out = get_session(session_id)
+    return out if out else {}
 
 
 def confirm_selection(session_id: str, user_id: int, concepts: list[dict]) -> dict:
@@ -463,6 +759,10 @@ def confirm_selection(session_id: str, user_id: int, concepts: list[dict]) -> di
     excluded from Confirm (row kept in UI), not stored. Parent-integrity still
     enforced: sub needs a selected main parent, orphans forbidden; subs of
     unselected mains excluded.
+
+    Continuous (iteration>1): incoming IDs are namespaced i{iter}- to avoid
+    PK collision with frozen prior iterations; rows tagged with iteration;
+    trail events carry iteration.
     """
     s = get_session(session_id)
     if not s:
@@ -473,7 +773,25 @@ def confirm_selection(session_id: str, user_id: int, concepts: list[dict]) -> di
         raise PermissionError("session not found for user")
     if s.get("stage") != "steps1-2":
         raise ValueError("already locked — concepts lock after Confirm")
+    cur_iter = get_iteration(session_id)
     items = concepts or []
+    # Namespace incoming IDs for continuations so (session_id,id) never collides
+    # with frozen prior iterations (Q12: c<iter>-xxxx). Iteration 1 keeps IDs.
+    if cur_iter > 1:
+        namespaced: list[dict] = []
+        for c in items:
+            d = dict(c)
+            _cid = ((d.get("concept_id") or d.get("id")) or "").strip()
+            _pid = (d.get("parent_id") or "")
+            if _cid and not _cid.startswith(f"i{cur_iter}-"):
+                # Avoid double-prefix on retry.
+                d["concept_id"] = f"i{cur_iter}-{_cid}"
+                if "id" in d:
+                    d["id"] = d["concept_id"]
+            if _pid and isinstance(_pid, str) and _pid.strip() and not _pid.strip().startswith(f"i{cur_iter}-"):
+                d["parent_id"] = f"i{cur_iter}-{_pid.strip()}"
+            namespaced.append(d)
+        items = namespaced
     mains = [c for c in items if (c.get("kind") or "main") == "main"]
     if not mains:
         raise ValueError("Select at least 1 main heading to continue")
@@ -489,6 +807,15 @@ def confirm_selection(session_id: str, user_id: int, concepts: list[dict]) -> di
             if _cid in seen:
                 raise ValueError(f"duplicate concept id: {_cid}")
             seen.add(_cid)
+    # Continuous: reject collision with frozen prior iterations (namespacing
+    # above should have prevented this; fail closed if it still happens).
+    try:
+        _existing_ids = {cc["id"] for cc in list_concepts(session_id)}
+    except Exception:
+        _existing_ids = set()
+    for _cid in seen:
+        if _cid in _existing_ids:
+            raise ValueError(f"concept id collides with existing: {_cid}")
     cleaned: list[dict] = []
     for c in items:
         cid = (c.get("concept_id") or c.get("id") or "").strip()
@@ -531,6 +858,7 @@ def confirm_selection(session_id: str, user_id: int, concepts: list[dict]) -> di
                 "pages": c.get("pages") or [],
                 "diagram_refs": c.get("diagram_refs") or [],
                 "diagram_description": c.get("diagram_description") or "",
+                "iteration": cur_iter,
             }
         )
     n = seed_concepts(session_id, user_id, cleaned)
@@ -547,7 +875,8 @@ def confirm_selection(session_id: str, user_id: int, concepts: list[dict]) -> di
                 "steps1-2",
                 json.dumps(
                     {"event": "confirmed", "title": c["title"],
-                     "kind": c["kind"], "source": c["source"]}
+                     "kind": c["kind"], "source": c["source"],
+                     "iteration": cur_iter}
                 ),
                 _now(),
             ),
@@ -557,7 +886,7 @@ def confirm_selection(session_id: str, user_id: int, concepts: list[dict]) -> di
     con.close()
     nm = sum(1 for c in cleaned if c["kind"] == "main")
     ns = sum(1 for c in cleaned if c["kind"] == "sub")
-    return {"loaded": n, "mains": nm, "subs": ns, "stage": "L1-2"}
+    return {"loaded": n, "mains": nm, "subs": ns, "stage": "L1-2", "iteration": cur_iter}
 
 
 # ---- Step 2 slice: L1-2 attempts + progress (additive) ----
@@ -596,6 +925,7 @@ def record_l12_attempt(
             "bypass": True,
             "warning_ack": "Ensure your self-defined concept is accurate — not verified against source.",
             "saved": bool(passed),
+            "iteration": get_iteration(session_id),
         }
     else:
         payload = {
@@ -606,6 +936,7 @@ def record_l12_attempt(
             "feedback": feedback,
             "hint": hint,
             "bypass": False,
+            "iteration": get_iteration(session_id),
         }
     con = connect()
     # UI_ISSUES.txt Problem 2: replace — delete prior L1-2 rows for this
@@ -643,11 +974,13 @@ def l12_status(session_id: str) -> dict:
     filter); no explicit hidden-flag column, no migration post-freeze.
     Transition-only note (§7): between P1-L5-complete (stage=Phase2, phase
     still phase1) and P2-confirm, this reports mains math. Cosmetic — the
-    Phase-2 modal covers the workspace until confirm_phase2 flips phase."""
+    Phase-2 modal covers the workspace until confirm_phase2 flips phase.
+    Continuous: filters to current iteration only (old frozen excluded)."""
     s = get_session(session_id)
     phase = (s or {}).get("phase") or "phase1"
+    cur_iter = get_iteration(session_id)
     concepts = list_concepts(session_id)
-    visible = [c for c in concepts if c.get("kind") == ("main" if phase == "phase1" else "sub")]
+    visible = [c for c in concepts if c.get("kind") == ("main" if phase == "phase1" else "sub") and _row_iteration(c) == cur_iter]
     total = len(visible)
     con = connect()
     rows = con.execute(
@@ -658,7 +991,16 @@ def l12_status(session_id: str) -> dict:
     done: set[str] = set()
     for r in rows:
         try:
-            if json.loads(r["payload"] or "{}").get("passed"):
+            pay = json.loads(r["payload"] or "{}")
+            # Old iterations' L1-2 rows must not count toward the new pool
+            # (pre-iteration payloads lack the key → default 1).
+            try:
+                pay_iter = int(pay.get("iteration") or 1)
+            except (TypeError, ValueError):
+                pay_iter = 1
+            if pay_iter != cur_iter:
+                continue
+            if pay.get("passed"):
                 done.add(r["concept_id"])
         except (ValueError, TypeError):
             continue
@@ -667,6 +1009,7 @@ def l12_status(session_id: str) -> dict:
     pct = round(100 * completed / total) if total else 0
     return {
         "phase": phase,
+        "iteration": cur_iter,
         "total": total,
         "completed": completed,
         "pct": pct,
@@ -700,12 +1043,14 @@ def l3_counted_ids(session_id: str) -> tuple[str, list[str]]:
     m3: kind-filter IS the hidden mechanism (no explicit hidden flag); mains
     display-only never pooled in Phase-2, subs hidden from Phase-1 math here.
     Transition-only note (§7): stage=Phase2/phase=phase1 window reports mains
-    math until confirm_phase2 flips phase; modal covers workspace meanwhile."""
+    math until confirm_phase2 flips phase; modal covers workspace meanwhile.
+    Continuous: filters to current iteration only."""
     s = get_session(session_id)
     phase = (s or {}).get("phase") or "phase1"
+    cur_iter = get_iteration(session_id)
     concepts = list_concepts(session_id)
     kind = "main" if phase == "phase1" else "sub"
-    ids = sorted(c["id"] for c in concepts if c.get("kind") == kind)
+    ids = sorted(c["id"] for c in concepts if c.get("kind") == kind and _row_iteration(c) == cur_iter)
     return phase, ids
 
 
@@ -713,13 +1058,19 @@ def l3_status(session_id: str) -> dict:
     import math
 
     phase, ids = l3_counted_ids(session_id)
+    cur_iter = get_iteration(session_id)
     n = len(ids)
     total = math.ceil(n / 3) if n else 0
     allowed = set(ids)
-    # Filtered math (Locks §7): mains display-only never counted in Phase 2.
-    # Only scenarios whose concept_ids ⊆ current counted set contribute.
+    # Filtered math (Locks §7 + continuous): mains display-only never counted
+    # in Phase 2; old iterations never pooled. Only scenarios whose
+    # concept_ids ⊆ current counted set contribute.
     scenarios = [x for x in list_scenarios(session_id)
-                 if set(x.get("concept_ids") or []) <= allowed]
+                 if set(x.get("concept_ids") or []) <= allowed and set(x.get("concept_ids") or [])]
+    # Empty-concept scenarios (legacy) are excluded: they would otherwise match
+    # every pool via subset-empty. Guard keeps total honest.
+    if not allowed:
+        scenarios = []
     cleared_scns = [x for x in scenarios if x.get("cleared")]
     cleared = len(cleared_scns)
     covered = {cid for x in cleared_scns for cid in (x.get("concept_ids") or [])}
@@ -727,6 +1078,7 @@ def l3_status(session_id: str) -> dict:
     pct = round(100 * cleared / total) if total else 0
     return {
         "phase": phase,
+        "iteration": cur_iter,
         "counted": ids,
         "total": total,
         "cleared": cleared,
@@ -780,12 +1132,24 @@ def create_scenario(
     if len(set(chunk)) != len(chunk):
         raise ValueError("duplicate concept in scenario chunk")
     sid = "scn-" + uuid.uuid4().hex[:6]
+    cur_iter = get_iteration(session_id)
     con = connect()
-    con.execute(
-        "INSERT INTO scenarios (id, session_id, text, concept_ids, cleared)"
-        " VALUES (?,?,?,?,0)",
-        (sid, session_id, text, json.dumps(list(concept_ids or []))),
-    )
+    try:
+        has_iter = "iteration" in {r[1] for r in con.execute("PRAGMA table_info(scenarios)").fetchall()}
+    except Exception:
+        has_iter = False
+    if has_iter:
+        con.execute(
+            "INSERT INTO scenarios (id, session_id, text, concept_ids, cleared, iteration)"
+            " VALUES (?,?,?,?,0,?)",
+            (sid, session_id, text, json.dumps(list(concept_ids or [])), cur_iter),
+        )
+    else:
+        con.execute(
+            "INSERT INTO scenarios (id, session_id, text, concept_ids, cleared)"
+            " VALUES (?,?,?,?,0)",
+            (sid, session_id, text, json.dumps(list(concept_ids or []))),
+        )
     con.commit()
     row = con.execute(
         "SELECT * FROM scenarios WHERE session_id = ? AND id = ?", (session_id, sid)
@@ -849,6 +1213,7 @@ def record_l3_attempt(
     """L3 trail write (session_id-only per §0; user_id ownership-only)."""
     # Defense-in-depth (§0/§8 uniformity): verify ownership here too.
     require_owned_session(session_id, user_id)
+    cur_iter = get_iteration(session_id)
     con = connect()
     con.execute(
         "INSERT INTO trail (session_id, concept_id, scenario_id, stage, payload, created)"
@@ -865,6 +1230,7 @@ def record_l3_attempt(
                     "feedback": feedback,
                     "hint": hint,
                     "omitted": bool(omitted),
+                    "iteration": cur_iter,
                 }
             ),
             _now(),
@@ -923,28 +1289,65 @@ def seed_concepts(
         items = concepts or []
     con = connect()
     n = 0
+    # Iteration for new rows: explicit per-row value wins, else current session iteration.
+    try:
+        _cur_iter_seed = get_iteration(session_id)
+    except Exception:
+        _cur_iter_seed = 1
+    try:
+        _has_iter_c = "iteration" in {r[1] for r in con.execute("PRAGMA table_info(concepts)").fetchall()}
+    except Exception:
+        _has_iter_c = False
     for c in items:
-        con.execute(
-            """INSERT OR REPLACE INTO concepts
-               (id, session_id, title, kind, parent_id, source,
-                explanation_type, explanation_text, explanation_source,
-                pages, diagram_refs, diagram_description)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                c.get("concept_id") or c.get("id"),
-                session_id,
-                c.get("title", ""),
-                c.get("kind", "main"),
-                c.get("parent_id"),
-                c.get("source", "extracted"),
-                c.get("explanation_type", "definition"),
-                c.get("explanation_text", ""),
-                c.get("explanation_source", "generated"),
-                json.dumps(c.get("pages", [])),
-                json.dumps(c.get("diagram_refs", [])),
-                c.get("diagram_description", ""),
-            ),
-        )
+        try:
+            _ri = int(c.get("iteration") or _cur_iter_seed)
+        except (TypeError, ValueError):
+            _ri = _cur_iter_seed
+        if _has_iter_c:
+            con.execute(
+                """INSERT OR REPLACE INTO concepts
+                   (id, session_id, title, kind, parent_id, source,
+                    explanation_type, explanation_text, explanation_source,
+                    pages, diagram_refs, diagram_description, iteration)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    c.get("concept_id") or c.get("id"),
+                    session_id,
+                    c.get("title", ""),
+                    c.get("kind", "main"),
+                    c.get("parent_id"),
+                    c.get("source", "extracted"),
+                    c.get("explanation_type", "definition"),
+                    c.get("explanation_text", ""),
+                    c.get("explanation_source", "generated"),
+                    json.dumps(c.get("pages", [])),
+                    json.dumps(c.get("diagram_refs", [])),
+                    c.get("diagram_description", ""),
+                    _ri,
+                ),
+            )
+        else:
+            con.execute(
+                """INSERT OR REPLACE INTO concepts
+                   (id, session_id, title, kind, parent_id, source,
+                    explanation_type, explanation_text, explanation_source,
+                    pages, diagram_refs, diagram_description)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    c.get("concept_id") or c.get("id"),
+                    session_id,
+                    c.get("title", ""),
+                    c.get("kind", "main"),
+                    c.get("parent_id"),
+                    c.get("source", "extracted"),
+                    c.get("explanation_type", "definition"),
+                    c.get("explanation_text", ""),
+                    c.get("explanation_source", "generated"),
+                    json.dumps(c.get("pages", [])),
+                    json.dumps(c.get("diagram_refs", [])),
+                    c.get("diagram_description", ""),
+                ),
+            )
         n += 1
     con.commit()
     con.close()
@@ -1094,9 +1497,13 @@ def _link_degrees(session_id: str) -> dict[str, int]:
 
 
 def l4_status(session_id: str) -> dict:
-    """Finish gate (Locks §4): undirected counting, >=1 to enable Finish,
-    max-3, n=1 auto-pass. Deleted pairs re-addable (only present pairs block)."""
+    """Finish gate: undirected counting, >=1 to enable Finish (global soft max-3).
+    Max-3 is a recommendation only (Q9a1 global): over-3 never blocks, just a
+    notice. Deleted pairs re-addable (only present pairs block).
+    Continuous: counted = current iteration only; degrees count all incident
+    (old+new) so new-old links satisfy >=1."""
     phase, counted = l3_counted_ids(session_id)
+    cur_iter = get_iteration(session_id)
     links = list_links(session_id)
     degs = _link_degrees(session_id)
     per = {cid: degs.get(cid, 0) for cid in counted}
@@ -1110,15 +1517,21 @@ def l4_status(session_id: str) -> dict:
     else:
         finish = all(per.get(cid, 0) >= 1 for cid in counted)
         auto = False
+    over = sorted([cid for cid in counted if per.get(cid, 0) > 3])
+    warn = "Each concept needs \u22651 link (one link per pair \u2014 direction stored for probing). ~3 recommended, more allowed. You can delete/re-pick links, but can\'t add concepts."
+    if over:
+        warn += f" Over recommended 3: {', '.join(over)}."
     return {
         "phase": phase,
+        "iteration": cur_iter,
         "counted": counted,
         "degrees": per,
         "links": links,
         "finish_enabled": finish,
         "n1_auto": auto,
         "presets": L4_PRESETS,
-        "warning": "Each concept needs 1-3 links (one link per pair — direction stored for probing). You can delete/re-pick links, but can't add concepts.",
+        "warning": warn,
+        "over_recommended": over,
     }
 
 
@@ -1126,8 +1539,8 @@ def create_link(session_id: str, from_id: str, to_id: str, edge_type: str,
                 user_id: int | None = None, is_preset: bool | None = None) -> dict:
     """Ordered store (from,to,type) for display/probe; undirected counting.
 
-    Gates: no loops, one-edge-per-pair (unordered, currently-present only),
-    max-3 per concept (Phase 2: sub side ≤3, mains soft-exempt).
+    Gates: no loops, one-edge-per-pair (unordered, currently-present only).
+    Max-3 is a recommendation only (global soft, Q9a1) — never blocks.
     Ownership (§0+§8): when user_id is given, verifies sessions.user_id ==
     user_id first (routes already gate; defense-in-depth).
     M3 (Locks §4 Q11): is_preset=True = preset-radio path (exact preset
@@ -1166,34 +1579,58 @@ def create_link(session_id: str, from_id: str, to_id: str, edge_type: str,
         kt = concepts[t].get("kind")
         if kf != "sub" and kt != "sub":
             raise ValueError("Phase 2 links need a sub endpoint (sub-sub or sub-main)")
+    # Continuous: frozen map — new links must touch the current pool.
+    # New-new and new↔old allowed; old↔old blocked (would mutate frozen map).
+    try:
+        _cur_iter_gate = get_iteration(session_id)
+    except Exception:
+        _cur_iter_gate = 1
+    if _cur_iter_gate > 1:
+        try:
+            _, _counted_gate = l3_counted_ids(session_id)
+            _allowed_gate = set(_counted_gate or [])
+        except Exception:
+            _allowed_gate = set()
+        if _allowed_gate and (f not in _allowed_gate and t not in _allowed_gate):
+            raise ValueError("Old↔old links locked — connect a new concept (new-new or new↔old allowed)")
     # One-edge-per-pair (unordered, present pairs only → deleted re-addable).
     for L in list_links(session_id):
         a, b = L.get("a_id"), L.get("b_id")
         if {a, b} == {f, t}:
             raise ValueError("One link per pair — direction stored for probing.")
     degs = _link_degrees(session_id)
+    # Q9a1 global: max-3 is a recommendation only — never blocks. Over-3 yields
+    # a notice (additive key) so the UI can surface it after repaint.
     notice = ""
-    if phase == "phase1":
-        if degs.get(f, 0) >= 3 or degs.get(t, 0) >= 3:
-            raise ValueError("Max 3 links per concept — pick the most important")
-    else:
-        # Sub side hard cap; mains soft-exempt (preserve Phase-1 bright state).
-        for cid in (f, t):
-            if concepts[cid].get("kind") == "sub" and degs.get(cid, 0) >= 3:
-                raise ValueError("Max 3 links per sub — pick the most important")
-        if degs.get(f, 0) >= 3 or degs.get(t, 0) >= 3:
-            notice = "Main over 3 links (soft-exempt to preserve Phase-1 state)"
+    if degs.get(f, 0) >= 3 or degs.get(t, 0) >= 3:
+        notice = f"Over recommended 3 links (now {max(degs.get(f, 0), degs.get(t, 0)) + 1} on one endpoint — recommendation only)"
+    cur_iter = get_iteration(session_id)
     lid = "l-" + _uuid.uuid4().hex[:6]
     con = connect()
     try:
-        has_phase = "phase" in {r[1] for r in con.execute("PRAGMA table_info(links)").fetchall()}
+        _cols = {r[1] for r in con.execute("PRAGMA table_info(links)").fetchall()}
+        has_phase = "phase" in _cols
+        has_iter = "iteration" in _cols
     except Exception:
         has_phase = False
-    if has_phase:
+        has_iter = False
+    if has_phase and has_iter:
+        con.execute(
+            "INSERT INTO links (id, session_id, a_id, b_id, edge_type, bright, phase, iteration)"
+            " VALUES (?,?,?,?,?,1,?,?)",
+            (lid, session_id, f, t, etype, phase, cur_iter),
+        )
+    elif has_phase:
         con.execute(
             "INSERT INTO links (id, session_id, a_id, b_id, edge_type, bright, phase)"
             " VALUES (?,?,?,?,?,1,?)",
             (lid, session_id, f, t, etype, phase),
+        )
+    elif has_iter:
+        con.execute(
+            "INSERT INTO links (id, session_id, a_id, b_id, edge_type, bright, iteration)"
+            " VALUES (?,?,?,?,?,1,?)",
+            (lid, session_id, f, t, etype, cur_iter),
         )
     else:
         con.execute(
@@ -1219,20 +1656,38 @@ def delete_link(session_id: str, link_id: str, user_id: int | None = None) -> bo
         raise ValueError("Graph frozen for evaluation. Click dimmed links to defend them.")
     if (s.get("stage") or "") != "L4":
         raise ValueError("Level 4 not active")
-    # Locks §7 (M4): mains keep links/bright, no reset — in Phase 2, old
-    # Phase-1 main-main links stay bright/excluded and must not be deleted.
-    # Only Phase-2 (new) links are deletable in Phase-2 L4.
-    if (s.get("phase") or "phase1") == "phase2":
-        _chk = connect()
+    # Locks §7 (M4) + continuous Q9c: old links locked.
+    # Phase 2: old Phase-1 links locked (mains keep links/bright).
+    # Continuous: old-iteration links locked — only current-iteration links deletable.
+    _chk = connect()
+    try:
+        _row = _chk.execute(
+            "SELECT phase, iteration FROM links WHERE session_id = ? AND id = ?",
+            (session_id, link_id),
+        ).fetchone()
+    except Exception:
         _row = _chk.execute(
             "SELECT phase FROM links WHERE session_id = ? AND id = ?",
             (session_id, link_id),
         ).fetchone()
-        _chk.close()
-        if _row is None:
-            raise KeyError("unknown link for this session")
-        if (_row["phase"] or "phase1") != "phase2":
+    _chk.close()
+    if _row is None:
+        raise KeyError("unknown link for this session")
+    try:
+        _rd = dict(_row)
+    except Exception:
+        _rd = {"phase": _row[0]}
+    if (s.get("phase") or "phase1") == "phase2":
+        if (_rd.get("phase") or "phase1") != "phase2":
             raise ValueError("Phase-1 links locked in Phase 2 (mains keep links/bright)")
+    try:
+        _cur = get_iteration(session_id)
+        _lrow_iter = int((_rd.get("iteration") or 1))
+    except Exception:
+        _lrow_iter = 1
+        _cur = 1
+    if _lrow_iter != _cur:
+        raise ValueError("Old-iteration links locked (only current-iteration links deletable)")
     con = connect()
     cur = con.execute(
         "DELETE FROM links WHERE session_id = ? AND id = ?", (session_id, link_id)
@@ -1276,35 +1731,49 @@ def l4_finish(session_id: str, user_id: int | None = None) -> dict:
 # ---- Step 5 slice: L5 Evaluate (Locks §5) ----
 
 def l5_enter(session_id: str) -> int:
-    """Entry dimming + N fixed at entry. P1: all dim; P2: new (phase2) only,
-    old main-main stay bright excluded. Idempotent (N fixed, never recomputed)."""
+    """Entry dimming + N fixed at entry. Continuous: only current-iteration links dim.
+    P1: all current-iteration dim; P2: current-iteration phase2 only, old stay bright.
+    Idempotent (N fixed, never recomputed)."""
     s = get_session(session_id)
     if not s:
         raise KeyError("no such session")
     phase = (s.get("phase") or "phase1")
-    # N already fixed for this phase → keep (frozen graph anyway).
-    if s.get("l5_n") is not None and (s.get("l5_phase") or "") == phase:
+    cur_iter = get_iteration(session_id)
+    # N already fixed for this phase+iteration → keep (frozen graph anyway).
+    # l5_phase stores "phase:iteration" for continuations, plain phase for iter 1.
+    _stored_phase = (s.get("l5_phase") or "")
+    _cur_key = f"{phase}:{cur_iter}" if cur_iter > 1 else phase
+    if s.get("l5_n") is not None and (_stored_phase == phase or _stored_phase == _cur_key):
         return int(s["l5_n"])
     links = list_links(session_id)
+    cur_links = [L for L in links if _row_iteration(L) == cur_iter]
     if phase == "phase1":
-        target_ids = [L["id"] for L in links]
+        target_ids = [L["id"] for L in cur_links]
     else:
-        target_ids = [L["id"] for L in links if (L.get("phase") or "phase1") == "phase2"]
+        target_ids = [L["id"] for L in cur_links if (L.get("phase") or "phase1") == "phase2"]
     con = connect()
     if target_ids:
         con.execute(
             f"UPDATE links SET bright = 0 WHERE session_id = ? AND id IN ({','.join('?' * len(target_ids))})",
             (session_id, *target_ids),
         )
+        # Old-iteration links stay bright excluded.
+        try:
+            con.execute(
+                "UPDATE links SET bright = 1 WHERE session_id = ? AND (iteration IS NULL OR iteration != ?)",
+                (session_id, cur_iter),
+            )
+        except Exception:
+            pass
         if phase == "phase2":
-            # Old links stay bright excluded.
+            # Old phase links stay bright excluded.
             con.execute(
                 "UPDATE links SET bright = 1 WHERE session_id = ? AND phase != 'phase2'",
                 (session_id,),
             )
     con.execute(
         "UPDATE sessions SET l5_n = ?, l5_phase = ? WHERE id = ?",
-        (len(target_ids), phase, session_id),
+        (len(target_ids), _cur_key, session_id),
     )
     con.commit()
     con.close()
@@ -1316,11 +1785,13 @@ def l5_status(session_id: str) -> dict:
     if not s:
         raise KeyError("no such session")
     phase = (s.get("phase") or "phase1")
+    cur_iter = get_iteration(session_id)
     links = list_links(session_id)
+    cur_links = [L for L in links if _row_iteration(L) == cur_iter]
     if phase == "phase1":
-        target = links
+        target = cur_links
     else:
-        target = [L for L in links if (L.get("phase") or "phase1") == "phase2"]
+        target = [L for L in cur_links if (L.get("phase") or "phase1") == "phase2"]
     n = s.get("l5_n")
     if n is None:
         # Pre-entry (Locks §5): Level 5 0%, N fixed at entry only.
@@ -1343,6 +1814,7 @@ def l5_status(session_id: str) -> dict:
             complete = bright >= n
     return {
         "phase": phase,
+        "iteration": cur_iter,
         "entered": entered,
         "n": n,
         "bright": bright,
@@ -1358,6 +1830,10 @@ def record_l5_attempt(session_id: str, link_id: str, why_answer: str, fail_answe
                       why_passed: bool, fail_passed: bool, why_feedback: str = "",
                       fail_feedback: str = "", why_hint: str = "", fail_hint: str = "") -> None:
     con = connect()
+    try:
+        _r5_iter = get_iteration(session_id)
+    except Exception:
+        _r5_iter = 1
     con.execute(
         "INSERT INTO trail (session_id, link_id, stage, payload, created)"
         " VALUES (?,?,?,?,?)",
@@ -1366,6 +1842,7 @@ def record_l5_attempt(session_id: str, link_id: str, why_answer: str, fail_answe
             "why_passed": bool(why_passed), "fail_passed": bool(fail_passed),
             "why_feedback": why_feedback, "fail_feedback": fail_feedback,
             "why_hint": why_hint, "fail_hint": fail_hint,
+            "iteration": _r5_iter,
         }), _now()),
     )
     con.commit()
@@ -1404,6 +1881,14 @@ def probe_submit(session_id: str, link_id: str, why_answer: str, fail_answer: st
     if _phase == "phase2" and _lphase != "phase2":
         con.close()
         raise ValueError("Link excluded from Phase-2 evaluation (old Phase-1 link stays bright)")
+    try:
+        _cur_iter = get_iteration(session_id)
+        _l_iter = int((dict(d).get("iteration") or 1))
+    except Exception:
+        _cur_iter, _l_iter = 1, 1
+    if _l_iter != _cur_iter:
+        con.close()
+        raise ValueError("Link excluded from evaluation (old-iteration link stays bright)")
     new_why = bool(d.get("why_passed")) or why_ok
     new_fail = bool(d.get("fail_passed")) or fail_ok
     bright = 1 if (new_why and new_fail) else 0
@@ -1481,6 +1966,7 @@ def confirm_phase2(session_id: str, user_id: int, subs: list[dict]) -> dict:
             "explanation_source": _p2_src,
             "pages": c.get("pages") or [], "diagram_refs": c.get("diagram_refs") or [],
             "diagram_description": c.get("diagram_description") or "",
+            "iteration": get_iteration(session_id),
         })
     # Merge: insert new ids, UPDATE title for existing SUB ids only
     # (Locks §7 subs add/rename allowed; §1 id-namespace integrity).
@@ -1519,6 +2005,7 @@ def confirm_phase2(session_id: str, user_id: int, subs: list[dict]) -> dict:
                                 "title": c["title"],
                                 "old_title": _old,
                                 "kind": "sub",
+                                "iteration": get_iteration(session_id),
                             }
                         ),
                         _now(),
@@ -1530,13 +2017,15 @@ def confirm_phase2(session_id: str, user_id: int, subs: list[dict]) -> dict:
         seed_concepts(session_id, [c for c in to_insert])
     # Trail init for newly merged subs.
     con = connect()
+    _p2_iter = get_iteration(session_id)
     for c in to_insert:
         con.execute(
             "INSERT INTO trail (session_id, concept_id, stage, payload, created)"
             " VALUES (?,?,?,?,?)",
             (session_id, c["concept_id"], "steps1-2",
              json.dumps({"event": "phase2-confirmed", "title": c["title"],
-                         "kind": "sub", "source": c["source"]}), _now()),
+                         "kind": "sub", "source": c["source"],
+                         "iteration": _p2_iter}), _now()),
         )
     # New cycle: phase2, L1-2, N reset (fixed at next L5 entry).
     con.execute(
@@ -1545,7 +2034,8 @@ def confirm_phase2(session_id: str, user_id: int, subs: list[dict]) -> dict:
     )
     con.commit()
     con.close()
-    all_subs = [c for c in list_concepts(session_id) if c.get("kind") == "sub"]
+    _cur_p2 = get_iteration(session_id)
+    all_subs = [c for c in list_concepts(session_id) if c.get("kind") == "sub" and _row_iteration(c) == _cur_p2]
     # §7: exactly 1 sub total → ≥2 recommended but allow. Use total after
     # merge (persisted hidden subs count), not just submitted seen.
     hint = ""

@@ -225,6 +225,11 @@ class UserIn(BaseModel):
 class SessionIn(BaseModel):
     user_id: int
     file: str = ""
+    name: str = ""
+
+
+class RenameIn(BaseModel):
+    name: str = ""
 
 
 class UploadIn(BaseModel):
@@ -289,35 +294,119 @@ def user_page(user_id: int) -> str:
     # UI_ISSUES.txt Problem 1: session list page is NOT a workspace —
     # no Manage Materials (Select/Extract) and no Level progress here.
     # Those live only in workspace_page() (Problem 2 gates when each appears).
-    return f"""<!doctype html><html><head>{_page_head()}<title>CogniMap — user {user_id}</title></head><body>
+    return f"""<!doctype html><html><head>{_page_head()}<title>CogniMap — user {user_id}</title>
+<style>
+#delOverlay{{position:fixed;inset:0;background:var(--backdrop);display:none;align-items:center;justify-content:center;z-index:200;padding:16px;box-sizing:border-box}}
+#delOverlay.open{{display:flex}}
+#delOverlay .modal-box{{animation:cogDelIn var(--dur-base) var(--ease-soft)}}
+@keyframes cogDelIn{{from{{opacity:0;transform:translateY(10px) scale(.98)}}to{{opacity:1;transform:none}}}}
+#delTitleRow{{display:flex;align-items:center;gap:10px}}
+#delIcon{{width:36px;height:36px;flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;background:var(--warn-bg);border:1px solid var(--warn-line)}}
+#delName{{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}}
+#delFoot{{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}}
+#delFoot .btn{{width:auto;min-width:96px;margin:0;padding:8px 18px}}
+#delConfirm{{background:var(--danger);border-color:var(--danger);color:#fff}}
+#delConfirm:hover{{opacity:.9}}
+</style></head><body>
 <div class="layout"><div class="sidebar"><div class="brand">CogniMap</div>
 <div class="card"><h3>Sessions</h3>
 <p class="muted">Create or open a session to start learning.</p></div>
 </div>
 <div class="main"><h2>User #{user_id} — sessions</h2>
-<input type="text" id="fname" placeholder="File label e.g. lecture.pdf">
+<input type="text" id="fname" placeholder="Workspace name e.g. Biology Ch.5" maxlength="100">
 <button class="btn primary" id="news">New session</button>
 <div id="sessions"></div>
 <p><a href="/">← profiles</a></p></div></div>
+<div id="delOverlay" role="dialog" aria-modal="true" aria-labelledby="delTitle">
+<div class="modal-box" style="width:min(440px,94vw)">
+<div id="delTitleRow"><div id="delIcon">🗑</div>
+<div style="min-width:0"><h3 id="delTitle" style="margin:0">Delete workspace?</h3>
+<div id="delName" class="muted" style="font-size:14px"></div></div></div>
+<p class="muted" style="margin:12px 0 0 0">This will permanently delete this workspace and all its data. This can't be undone.</p>
+<div id="delFoot"><button class="btn" id="delCancel">Cancel</button><button class="btn" id="delConfirm">Delete</button></div>
+</div></div>
 <script>
+function esc(s) {{ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }}
+let pendingDelId = null;
+function openDelModal(sid, label) {{
+  pendingDelId = sid;
+  document.getElementById('delName').textContent = label || sid;
+  document.getElementById('delOverlay').classList.add('open');
+  document.getElementById('delCancel').focus();
+}}
+function closeDelModal() {{
+  pendingDelId = null;
+  document.getElementById('delOverlay').classList.remove('open');
+}}
 async function refresh() {{
   const r = await fetch('/api/sessions?user_id={user_id}'); const s = await r.json();
-  document.getElementById('sessions').innerHTML = s.map(x =>
-    `<div class="file-row"><span>${{x.file || x.id}} · ${{x.stage}}</span>
-     <a href="/u/{user_id}/s/${{x.id}}">open workspace</a>
-     <button class="icon-btn" data-delsess="${{x.id}}" title="delete session">x</button></div>`).join('') || '<p>No sessions yet.</p>';
+  document.getElementById('sessions').innerHTML = s.map(x => {{
+    const label = x.name || x.file || x.id;
+    return `<div class="file-row" style="flex-wrap:wrap;gap:8px" data-sid="${{x.id}}">`
+      + `<span class="ws-label" style="flex:1;min-width:0" title="${{esc(label)}}">${{esc(label)}} · ${{esc(x.stage)}}</span>`
+      + `<a class="btn sm primary ws-open" style="text-decoration:none;flex-shrink:0" title="Open workspace" href="/u/{user_id}/s/${{x.id}}">Open →</a>`
+      + `<span class="ws-actions" style="flex-shrink:0"><button class="icon-btn" data-rename="${{x.id}}" title="rename workspace">✎</button>`
+      + `<button class="icon-btn" data-delsess="${{x.id}}" title="delete session">x</button></span>`
+      + `<div class="ws-rename hidden" style="flex-basis:100%;display:none;gap:6px;margin-top:6px"><input type="text" maxlength="100" value="${{esc(label)}}"><button class="btn sm primary">Save</button><button class="btn sm">Cancel</button></div></div>`;
+  }}).join('') || '<p>No sessions yet.</p>';
   document.querySelectorAll('[data-delsess]').forEach(b => {{
-    b.onclick = async () => {{
-      if (!confirm('Delete this session and all its data?')) return;
-      await fetch('/api/sessions/' + b.getAttribute('data-delsess') + '?user_id={user_id}', {{method:'DELETE'}});
-      refresh();
+    b.onclick = () => {{
+      const row = b.closest('.file-row');
+      const sid = b.getAttribute('data-delsess');
+      const lblEl = row ? row.querySelector('.ws-label') : null;
+      openDelModal(sid, lblEl ? lblEl.textContent : sid);
+    }};
+  }});
+  const ov = document.getElementById('delOverlay');
+  ov.onclick = (e) => {{ if (e.target === ov) closeDelModal(); }};
+  document.getElementById('delCancel').onclick = closeDelModal;
+  document.getElementById('delConfirm').onclick = async () => {{
+    if (!pendingDelId) return;
+    await fetch('/api/sessions/' + pendingDelId + '?user_id={user_id}', {{method:'DELETE'}});
+    closeDelModal(); refresh();
+  }};
+  document.onkeydown = (e) => {{ if (e.key === 'Escape' && ov.classList.contains('open')) closeDelModal(); }};
+  document.querySelectorAll('[data-rename]').forEach(b => {{
+    b.onclick = () => {{
+      const row = b.closest('.file-row');
+      // Exclusive edit mode: close any other open rename box first so only
+      // one row shows Save/Cancel at a time.
+      document.querySelectorAll('.file-row').forEach(r => {{
+        if (r !== row) {{
+          const ob = r.querySelector('.ws-rename');
+          if (ob) {{ ob.classList.add('hidden'); ob.style.display = 'none'; }}
+          const oa = r.querySelector('.ws-actions');
+          if (oa) oa.style.display = '';
+          const oo = r.querySelector('.ws-open');
+          if (oo) oo.style.display = '';
+        }}
+      }});
+      const box = row.querySelector('.ws-rename');
+      const actions = row.querySelector('.ws-actions');
+      const openBtn = row.querySelector('.ws-open');
+      const inp = box.querySelector('input');
+      // Hide pencil/x + Open button while editing — only input + Save/Cancel visible.
+      if (actions) actions.style.display = 'none';
+      if (openBtn) openBtn.style.display = 'none';
+      box.classList.remove('hidden'); box.style.display = 'flex'; inp.focus(); inp.select();
+      box.querySelector('.btn.primary').onclick = async () => {{
+        const name = inp.value.trim();
+        if (!name) {{ alert('Workspace name required'); return; }}
+        if (name.length > 100) {{ alert('Workspace name max 100 chars'); return; }}
+        const r2 = await fetch('/api/sessions/' + b.getAttribute('data-rename') + '?user_id={user_id}',
+          {{method:'PATCH', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{name}})}});
+        if (!r2.ok) {{ alert((await r2.text()).slice(0,300)); return; }}
+        refresh();
+      }};
+      box.querySelectorAll('.btn')[1].onclick = () => {{ box.classList.add('hidden'); box.style.display = 'none'; if (actions) actions.style.display = ''; if (openBtn) openBtn.style.display = ''; }};
+      inp.onkeydown = (e) => {{ if (e.key === 'Enter') box.querySelector('.btn.primary').click(); if (e.key === 'Escape') box.querySelectorAll('.btn')[1].click(); }};
     }};
   }});
 }}
 document.getElementById('news').onclick = async () => {{
-  const file = document.getElementById('fname').value || 'seed-demo.pdf';
+  const file = document.getElementById('fname').value.trim() || 'seed-demo.pdf';
   const r = await fetch('/api/sessions', {{method:'POST', headers:{{'Content-Type':'application/json'}},
-    body: JSON.stringify({{user_id:{user_id}, file}})}});
+    body: JSON.stringify({{user_id:{user_id}, file, name: file}})}});
   const s = await r.json(); window.location = '/u/{user_id}/s/' + s.id;
 }};
 refresh();
@@ -342,7 +431,7 @@ _STAGE_FLOW = (
 )
 
 
-def _stage_flow(user_id: int, session_id: str, stage: str, phase: str) -> str:
+def _stage_flow(user_id: int, session_id: str, stage: str, phase: str, display: str = "") -> str:
     """Top-bar stage flow header (replaces the old workspace h2 heading)."""
     stage = stage or "steps1-2"
     phase = phase or "phase1"
@@ -365,9 +454,10 @@ def _stage_flow(user_id: int, session_id: str, stage: str, phase: str) -> str:
             f'<div class="{cls}" data-stage="{key}" title="{label}">'
             f'<span class="stp-dot"></span><span class="stp-name">{label}</span>{chip}</div>'
         )
+    _label = (display or session_id or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     return (
         '<header class="topflow">'
-        f'<span class="topflow-id">user #{user_id} · {session_id}</span>'
+        f'<span class="topflow-id" id="wsTopLabel" title="{_label}">user #{user_id} · {_label}</span>'
         f'<div id="stageFlow" class="stage-flow" data-phase="{phase}" role="group" aria-label="Learning stage progress">'
         f'<div class="stp-track"><div class="stp-traveler"></div>{"".join(steps)}</div>'
         "</div></header>"
@@ -391,9 +481,12 @@ def workspace_page(user_id: int, session_id: str) -> str:
         _s = store.get_session(session_id)
         _stage = (_s or {}).get("stage") or "steps1-2"
         _phase = (_s or {}).get("phase") or "phase1"
+        _ws_display = ((_s or {}).get("name") or (_s or {}).get("file") or session_id)
     except Exception:
         _stage = "steps1-2"
         _phase = "phase1"
+        _ws_display = session_id
+    _ws_esc = str(_ws_display).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     _hid_mat = "" if _stage == "steps1-2" else " hidden"
     _hid_l12 = "" if _stage == "L1-2" else " hidden"
     _hid_l3 = "" if _stage == "L3" else " hidden"
@@ -403,8 +496,12 @@ def workspace_page(user_id: int, session_id: str) -> str:
     # sub-headings popup (phase2X) left no way to reopen it. Phase2 card with
     # an explicit Continue button gives a persistent reopen path after cancel.
     _hid_p2 = "" if _stage == "Phase2" else " hidden"
+    _hid_done = "" if _stage == "done" else " hidden"
     return f"""<!doctype html><html><head>{_page_head()}<title>CogniMap workspace</title></head><body>
 <div class="layout workspace"><div class="sidebar"><div class="brand">CogniMap{_mode_badge()}</div>
+<div class="card" id="wsCard"><h3>Workspace</h3>
+<div class="file-row" id="wsViewRow"><span id="wsName" title="{_ws_esc}">{_ws_esc}</span><button class="icon-btn" id="wsRenameBtn" title="rename workspace">✎</button></div>
+<div id="wsRenameBox" class="hidden"><input type="text" id="wsRenameInput" maxlength="100" value="{_ws_esc}"><div id="wsRenameMsg" class="warn hidden"></div><div style="display:flex;gap:6px;margin-top:6px"><button class="btn sm primary" id="wsRenameSave">Save</button><button class="btn sm" id="wsRenameCancel">Cancel</button></div></div></div>
 <div class="card{_hid_mat}" id="materialsCard"><h3>Manage Materials</h3>
 <button class="btn" id="selBtn">Select Files</button>
 <input type="file" id="filePick" accept=".pdf,.md,.txt" style="display:none">
@@ -412,28 +509,38 @@ def workspace_page(user_id: int, session_id: str) -> str:
 <div id="fileWarn" class="warn hidden"></div></div>
 <div class="card" id="filesCard"><h3>Studying</h3>
 <div id="files"></div></div>
+<div class="card" id="printCard"><h3>Print</h3>
+<p class="muted stage-desc">Revision hardcopy — anytime, B&amp;W-safe.</p>
+<button class="btn" id="printBtn">Print Study Pack</button></div>
 <div class="card{_hid_l12}" id="l12card"><h3>Level 1 - 2 [Remember/Understand]</h3>
+<p class="muted stage-desc">Remember — retrieve relevant knowledge from memory. Understand — construct meaning: interpret, explain, and summarize ideas.</p>
 <div id="progress"></div></div>
 <div class="card{_hid_l3}" id="l3card"><h3>Level 3 [Apply]</h3>
+<p class="muted stage-desc">Apply — carry out or use a procedure in a given situation.</p>
 <button class="btn purple" id="genBtn" disabled>Generate Scenario</button>
 <div id="l3progress"></div></div>
 <div class="card{_hid_l4}" id="l4card"><h3>Level 4 [Analyze]</h3>
-<div id="l4rules"><ul><li>Each concept must have at least one connection</li><li>You may create up to 3 connections per concept</li><li>Select a relationship type for each connection (e.g., causes, depends on, leads to)</li><li>Focus on the most important relationships rather than connecting everything</li><li><b>How to link:</b> press + hold the <b>RIGHT</b> mouse button on a concept, drag to another concept, release. LEFT-drag only moves concepts. On touch screens, drag one concept onto another.</li></ul></div>
-<div id="l4warn" class="warn">Each concept needs 1-3 links (one link per pair — direction stored for probing). LEFT-drag moves concepts (never links); RIGHT-press-and-hold + drag creates links. You can delete/re-pick links, but can't add concepts.</div>
+<p class="muted stage-desc">Analyze — break material into its parts and see how the parts relate to one another and to the whole.</p>
+<div id="l4rules"><ul><li>Each concept must have at least one connection</li><li>~3 connections per concept recommended (more allowed)</li><li>Select a relationship type for each connection (e.g., causes, depends on, leads to)</li><li>Focus on the most important relationships rather than connecting everything</li><li><b>How to link:</b> press + hold the <b>RIGHT</b> mouse button on a concept, drag to another concept, release. LEFT-drag only moves concepts. On touch screens, drag one concept onto another.</li></ul></div>
+<div id="l4warn" class="warn">Each concept needs \u22651 link (one link per pair \u2014 direction stored for probing, ~3 recommended, more allowed). LEFT-drag moves concepts (never links); RIGHT-press-and-hold + drag creates links. You can delete/re-pick links, but can\'t add concepts.</div>
 <div id="l4status">Level 4: no links yet</div>
 <button class="btn green" id="finishBtn" disabled>Finish</button></div>
 <div class="card{_hid_l5}" id="l5card"><h3>Level 5 [Evaluate]</h3>
+<p class="muted stage-desc">Evaluate — make judgments based on criteria and standards.</p>
 <div id="l5warn" class="warn">Graph frozen for evaluation. Click dimmed links to defend them.</div>
 <div id="l5progress"></div></div>
 <div class="card{_hid_p2}" id="phase2card"><h3>Sub-Headings Expansion</h3>
-<p class="muted">Conceptual overview complete — expand into sub-concepts when ready.</p>
+<p class="muted stage-desc">Conceptual overview complete — expand into sub-concepts when ready.</p>
 <button class="btn primary" id="phase2Btn">Continue to Sub-Headings</button></div>
+<div class="card{_hid_done}" id="donecard"><h3>Finished — Continue Study</h3>
+<p class="muted stage-desc">Final map complete. Study new material in the same workspace.</p>
+<button class="btn primary" id="continueSideBtn">Continue with new material</button><div id="continueSideMsg" class="warn hidden"></div></div>
 <!-- UI_ISSUES.txt #1: the stage percentage meter lives at the BOTTOM of the
 left panel (margin-top auto pins it; style.css). Server renders real numbers
 for the current stage via _meter_for_stage; meter.js repaints on every paint. -->
 {_meter_for_stage(session_id, _stage)}
 <p><a href="/u/{user_id}">← sessions</a></p></div>
-<div class="main">{_stage_flow(user_id, session_id, _stage, _phase)}
+<div class="main">{_stage_flow(user_id, session_id, _stage, _phase, _ws_display)}
 <div id="graph">Graph canvas — mains render here after Confirm (Phase 1 mains-only)</div>
 <div id="edgePanel" class="hidden"><div class="modal-head"><h4 id="edgeTitle">Type of edges</h4><button class="btn sm" id="edgeCancel">x</button></div><div id="edgeSub" class="muted"></div><div id="edgeOpts"></div>
 <input type="text" id="edgeCustom" maxlength="24" placeholder="custom (1-24 chars, max 3 words)">
@@ -458,9 +565,11 @@ for the current stage via _meter_for_stage; meter.js repaints on every paint. --
 <div id="tree"></div>
 <div class="add-line" id="addMain" title="Add Main Heading"><span>+ Add Main Heading</span></div>
 <div class="modal-foot"><button class="btn green" id="confirmSel">Confirm Selection</button></div>
-<div id="lockBox" class="lock hidden">
+</div></div>
+<div id="lockBox" class="lock-overlay hidden"><div class="modal-box lock-box" role="dialog" aria-modal="true" aria-labelledby="lockTitle">
+<h3 id="lockTitle" style="margin:0">Heads up</h3>
 <p>Heads up — concepts lock after this. Check names/selection, you can't add/delete later. ≥2–3 mains recommended (a single main auto-passes Analyze/Evaluate with no links to defend).</p>
-<button class="btn green" id="lockConfirm">Confirm</button>
+<div class="modal-foot lock-foot"><button class="btn green" id="lockConfirm">Confirm</button>
 <button class="btn" id="lockBack">Back</button></div>
 </div></div>
 <div id="scnmodal"><div class="modal-box modal-wide">
@@ -487,6 +596,7 @@ load BEFORE the modules that call CogniMapMeter.html during init(). -->
 <script src="{_sv('phase2.js')}"></script>
 <script src="{_sv('history.js')}"></script>
 <script src="{_sv('stageflow.js')}"></script>
+<script src="{_sv('print.js')}"></script>
 <div id="l3modal"><div class="modal-box">
 <h3>Level 1 - 2 Complete!</h3>
 <p>Core meanings secured. Welcome to <b>Level 3 - Apply</b>: face real-world scenarios and identify which concepts defend your reasoning.</p>
@@ -532,11 +642,90 @@ load BEFORE the modules that call CogniMapMeter.html during init(). -->
 <div id="donemodal"><div class="modal-box">
 <h3>All learned — final map complete!</h3>
 <p>Fully robust, interconnected concept map intact (mains + subs, all links bright). Review any stage via the history dropdown.</p>
-<button class="btn primary" id="doneOk">View final map</button>
+<div class="modal-foot" style="display:flex;gap:10px;justify-content:flex-end"><button class="btn primary" id="doneOk">View final map</button><button class="btn" id="continueBtn" title="Study new material in the same workspace">Continue with new material</button></div>
+<div id="continueMsg" class="warn hidden"></div>
 </div></div>
+<div id="printmodal" class="hidden"><div class="modal-box">
+<div class="modal-head"><h3>Print Study Pack</h3><button class="btn sm" id="printX">x</button></div>
+<p class="muted">Revision pack, anytime with status header. B&amp;W-safe, subs nested under mains.</p>
+<label><input type="checkbox" id="ppChkMap" checked> Map image (list always prints)</label><br>
+<label><input type="checkbox" id="ppChkWords" checked> In-your-words (last passed)</label><br>
+<label><input type="checkbox" id="ppChkScn" checked> Scenarios + Used-in</label><br>
+<label><input type="checkbox" id="ppChkLinks" checked> Links (per-concept + full list)</label>
+<div id="ppMsg" class="muted"></div>
+<div class="modal-foot" style="display:flex;gap:10px;justify-content:flex-end"><button class="btn" id="printCancel">Cancel</button><button class="btn primary" id="printGo">Print</button></div>
+</div></div>
+<div id="printPack" aria-hidden="true"></div>
 <!-- Problem 4: init runs AFTER all modal divs so trailing Continue/close bindings (l12guideContinue/toL3Btn/toL5Btn/probe/phase2/doneOk) exist at bind time. src tags stay above; only the init call moved to the end. -->
 <!-- m3 frozen post-Step 0 (no schema change): init order is steps12.init(user,session) vs l12/l3/l4/l5/phase2/history.init(session,user). Call sites match; do not unify. -->
-<script>CogniMapSteps12.init({user_id}, '{session_id}'); CogniMapL12.init('{session_id}', {user_id}); CogniMapL3.init('{session_id}', {user_id}); CogniMapL4.init('{session_id}', {user_id}); CogniMapL5.init('{session_id}', {user_id}); CogniMapPhase2.init('{session_id}', {user_id}); CogniMapHistory.init('{session_id}', {user_id}); CogniMapStageFlow.init('{session_id}', {user_id});</script>
+<script>CogniMapSteps12.init({user_id}, '{session_id}'); CogniMapL12.init('{session_id}', {user_id}); CogniMapL3.init('{session_id}', {user_id}); CogniMapL4.init('{session_id}', {user_id}); CogniMapL5.init('{session_id}', {user_id}); CogniMapPhase2.init('{session_id}', {user_id}); CogniMapHistory.init('{session_id}', {user_id}); CogniMapStageFlow.init('{session_id}', {user_id}); CogniMapPrint.init('{session_id}', {user_id});
+(function() {{
+  var SID='{session_id}', UID={user_id};
+  function esc(s) {{ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }}
+  function showMsg(t) {{ var m=document.getElementById('wsRenameMsg'); if(!m) return; m.textContent=t||''; m.classList.toggle('hidden', !t); }}
+  var btn=document.getElementById('wsRenameBtn'), box=document.getElementById('wsRenameBox'),
+      inp=document.getElementById('wsRenameInput'), nm=document.getElementById('wsName');
+  if(btn && box && inp) {{
+    btn.onclick=function() {{ box.classList.remove('hidden'); showMsg(''); btn.style.display='none'; inp.focus(); inp.select(); }};
+    document.getElementById('wsRenameCancel').onclick=function() {{ box.classList.add('hidden'); showMsg(''); btn.style.display=''; }};
+    document.getElementById('wsRenameSave').onclick=async function() {{
+      var name=inp.value.trim();
+      if(!name) {{ showMsg('Workspace name required'); return; }}
+      if(name.length>100) {{ showMsg('Workspace name max 100 chars'); return; }}
+      try {{
+        var r=await fetch('/api/sessions/'+SID+'?user_id='+UID, {{method:'PATCH', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{name}})}});
+        if(!r.ok) {{ showMsg((await r.text()).slice(0,300)); return; }}
+        var s=await r.json(); var label=s.name || s.file || SID;
+        nm.textContent=label; nm.title=label; inp.value=label;
+        var top=document.getElementById('wsTopLabel'); if(top) {{ top.textContent='user #'+UID+' · '+label; top.title=label; }}
+        try {{ document.title='CogniMap — '+label; }} catch(e) {{}}
+        box.classList.add('hidden'); showMsg(''); btn.style.display='';
+      }} catch(e) {{ showMsg('Rename failed — try again'); }}
+    }};
+    inp.onkeydown=function(e) {{ if(e.key==='Enter') document.getElementById('wsRenameSave').click(); if(e.key==='Escape') document.getElementById('wsRenameCancel').click(); }};
+  }}
+  // Keep the sidebar/top-bar labels in sync with server truth (covers
+  // renames made in another tab + backfilled names on old sessions).
+  (async function() {{ try {{
+    var r=await fetch('/api/sessions/'+SID+'/state?user_id='+UID); if(!r.ok) return;
+    var j=await r.json(); var s=(j&&j.session)||{{}}; var label=s.name || s.file || SID; if(!label) return;
+    if(nm && nm.textContent!==label) {{ nm.textContent=label; nm.title=label; }}
+    if(inp && document.getElementById('wsRenameBox').classList.contains('hidden')) inp.value=label;
+    var top=document.getElementById('wsTopLabel'); if(top) {{ top.textContent='user #'+UID+' · '+label; top.title=label; }}
+  }} catch(e) {{}} }})();
+  // Continuous study (done → new iteration in the same workspace).
+  try {{
+    var sideBtn=document.getElementById('continueSideBtn'), sideMsg=document.getElementById('continueSideMsg');
+    if(sideBtn) sideBtn.onclick=async function() {{
+      if(sideMsg) {{ sideMsg.textContent=''; sideMsg.classList.add('hidden'); }}
+      sideBtn.disabled=true;
+      try {{
+        var r=await fetch('/api/sessions/'+SID+'/continue?user_id='+UID, {{method:'POST'}});
+        var txt=await r.text(); var j={{}}; try {{ j=JSON.parse(txt); }} catch(e) {{ j={{detail:txt}}; }}
+        if(!r.ok) throw new Error(j.detail||('HTTP '+r.status));
+        location.reload();
+      }} catch(e) {{
+        if(sideMsg) {{ sideMsg.textContent=e.message; sideMsg.classList.remove('hidden'); }}
+        sideBtn.disabled=false;
+      }}
+    }};
+    var doneOk=document.getElementById('doneOk'), contBtn=document.getElementById('continueBtn'), contMsg=document.getElementById('continueMsg'), doneModal=document.getElementById('donemodal');
+    if(doneOk && doneModal) doneOk.onclick=function() {{ doneModal.classList.remove('open'); }};
+    if(contBtn) contBtn.onclick=async function() {{
+      if(contMsg) {{ contMsg.textContent=''; contMsg.classList.add('hidden'); }}
+      contBtn.disabled=true;
+      try {{
+        var r=await fetch('/api/sessions/'+SID+'/continue?user_id='+UID, {{method:'POST'}});
+        var txt=await r.text(); var j={{}}; try {{ j=JSON.parse(txt); }} catch(e) {{ j={{detail:txt}}; }}
+        if(!r.ok) throw new Error(j.detail||('HTTP '+r.status));
+        location.reload();
+      }} catch(e) {{
+        if(contMsg) {{ contMsg.textContent=e.message; contMsg.classList.remove('hidden'); }}
+        contBtn.disabled=false;
+      }}
+    }};
+  }} catch(e) {{}}
+}})();</script>
 </body></html>"""
 
 
@@ -649,7 +838,25 @@ def api_create_session(payload: SessionIn):
         raise HTTPException(404, "no such user")
     if not any(u.get("id") == uid for u in store.list_users()):
         raise HTTPException(404, "no such user")
-    return store.create_session(uid, payload.file)
+    return store.create_session(uid, payload.file, payload.name)
+
+
+@app.patch("/api/sessions/{session_id}")
+def api_rename_session(session_id: str, payload: RenameIn, user_id: int | None = None):
+    """Rename workspace (additive): updates sessions.name only.
+
+    Ownership-checked (§0+§8): sessions.user_id == user_id, else 404.
+    Validation: 1-100 chars, single line. File labels / session_files
+    untouched. Missing user_id fails closed (404, never 422).
+    """
+    try:
+        return store.rename_session(session_id, user_id, payload.name)
+    except PermissionError as e:
+        raise HTTPException(404, str(e))
+    except KeyError:
+        raise HTTPException(404, "no such session")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 def _uploads_session_dir(session_id: str) -> str:
@@ -856,32 +1063,73 @@ def api_upload_pdf(session_id: str, user_id: int | None = None,
             "files": store.list_files(session_id)}
 
 
+@app.post("/api/sessions/{session_id}/continue")
+def api_continue(session_id: str, user_id: int | None = None):
+    """Continuous study (Q5/Q8/Q12): done → steps1-2 for a new iteration.
+    Preserves the frozen map; next upload/extract/confirm builds the new pool."""
+    s = _owned(session_id, user_id)
+    try:
+        return store.continue_session(session_id, int(s["user_id"]))
+    except PermissionError as e:
+        raise HTTPException(404, str(e))
+    except (ValueError, KeyError) as e:
+        raise HTTPException(400, str(e))
+
+
 @app.post("/api/sessions/{session_id}/extract")
 def api_extract(session_id: str, user_id: int | None = None):
     s = _owned(session_id, user_id)
     # Locks §6 lock: extraction is a Steps 1-2 operation only.
     if (s.get("stage") or "") != "steps1-2":
         raise HTTPException(400, "already locked — concepts lock after Confirm")
-    if not (s.get("file") or "").strip():
+    cur_iter = store.get_iteration(session_id)
+    cur_files = store.list_current_files(session_id)
+    if not cur_files and not (s.get("file") or "").strip():
         raise HTTPException(400, "upload a file first (Select Files)")
-    # S1: prefer disk bytes for live parse when present (upload-pdf path);
-    # label-only sessions stay stub (frozen /upload path, no breakage).
-    pdf_bytes: bytes | None = None
-    try:
-        cand = os.path.join(config.upload_root(), str(session_id), str(s["file"]))
-        if os.path.isfile(cand) and os.path.getsize(cand) <= config.MAX_PDF_BYTES:
-            with open(cand, "rb") as fh:
-                pdf_bytes = fh.read()
-    except Exception as e:
-        log.warning("extract disk read skipped: %s", e)
-        pdf_bytes = None
-    parsed = parse.parse_pdf(s["file"], pdf_bytes=pdf_bytes)
-    status = llm.extract_concepts_with_status(parsed.get("markdown", ""), parsed.get("figures"))
+    # Continuous Q7: merged single extract — filename-order concat of current-
+    # iteration files, clipped by the P1 8000-char window in build_p1_user.
+    # S1 disk-bytes preference preserved per file; label-only stays stub.
+    file_labels = [f.get("filename") for f in cur_files if (f.get("filename") or "").strip()]
+    if not file_labels:
+        file_labels = [(s.get("file") or "").strip()]
+    md_parts: list[str] = []
+    all_figs: list[dict] = []
+    parsed_file = file_labels[0] if file_labels else (s.get("file") or "")
+    parsed_pages: list[int] = []
+    parsed_mode = "stub"
+    parsed_reason = ""
+    for _label in file_labels:
+        _pdf_bytes: bytes | None = None
+        try:
+            _cand = os.path.join(config.upload_root(), str(session_id), str(_label))
+            if os.path.isfile(_cand) and os.path.getsize(_cand) <= config.MAX_PDF_BYTES:
+                with open(_cand, "rb") as _fh:
+                    _pdf_bytes = _fh.read()
+        except Exception as e:
+            log.warning("extract disk read skipped %s: %s", _label, e)
+            _pdf_bytes = None
+        _parsed = parse.parse_pdf(_label, pdf_bytes=_pdf_bytes)
+        _md = (_parsed.get("markdown") or "").strip()
+        if _md:
+            md_parts.append(f"<!-- file {_label} -->\n{_md}")
+        all_figs.extend(_parsed.get("figures") or [])
+        if not parsed_pages and _parsed.get("pages"):
+            parsed_pages = list(_parsed.get("pages") or [])
+        # Live if any file parsed live; else keep stub reason.
+        if _parsed.get("mode") == "live":
+            parsed_mode = "live"
+            parsed_reason = ""
+        elif parsed_mode != "live" and _parsed.get("fallback_reason"):
+            parsed_reason = str(_parsed.get("fallback_reason") or "")
+    merged_md = "\n\n".join(md_parts)
+    parsed = {"file": ", ".join(file_labels), "pages": parsed_pages, "mode": parsed_mode, "fallback_reason": parsed_reason,
+              "markdown": merged_md, "figures": all_figs}
+    status = llm.extract_concepts_with_status(merged_md, all_figs)
     concepts = status["concepts"]
     mode = status.get("mode") or "stub"
     model = status.get("model") or "stub"
     if status.get("fallback_reason"):
-        log.warning("extract fallback %s: %s", s["file"], status.get("fallback_reason"))
+        log.warning("extract fallback %s: %s", parsed.get("file"), status.get("fallback_reason"))
     out: dict = {"concepts": concepts,
                  "parsed": {"file": parsed.get("file"), "pages": parsed.get("pages"),
                             "mode": parsed.get("mode", "stub"),
@@ -929,7 +1177,9 @@ def api_l12_verify(session_id: str, payload: VerifyIn, user_id: int | None = Non
     text = (payload.paraphrase or "").strip()
     if not text:
         raise HTTPException(400, "write your paraphrase first")
-    # Kind-phase match (§7 math): phase1 verifies mains, phase2 verifies subs.
+    # Kind-phase match (§7 math) + continuous iteration gate (Q10):
+    # phase1 verifies mains, phase2 verifies subs; only current-iteration
+    # concepts are verifiable (old frozen rows are history-only).
     _concepts = {c["id"]: c for c in store.list_concepts(session_id)}
     _c = _concepts.get(cid)
     if _c:
@@ -938,6 +1188,13 @@ def api_l12_verify(session_id: str, payload: VerifyIn, user_id: int | None = Non
             raise HTTPException(400, "Phase 1 verifies mains only (subs hidden for Phase-2)")
         if _phase == "phase2" and _c.get("kind") != "sub":
             raise HTTPException(400, "Main completed in Phase 1 — history-only in Phase 2")
+        try:
+            _cur_iter = store.get_iteration(session_id)
+            _c_iter = int((_c.get("iteration") or 1))
+        except Exception:
+            _cur_iter, _c_iter = 1, 1
+        if _c_iter != _cur_iter:
+            raise HTTPException(400, "Concept from a previous iteration — history-only")
     try:
         # Locks §8: session/id-keyed — resolves the explanation server-side
         # by owned (session_id, concept_id), never client text. S2 live path
@@ -1040,12 +1297,29 @@ def api_l3_generate(session_id: str, user_id: int | None = None):
     context = "; ".join(
         f"{cid}: {(concepts.get(cid) or {}).get('explanation_text', '')}" for cid in chunk
     )
-    # Locks §3+§7: context may carry mains as display-only background in
-    # Phase-2 — never chunked/pooled (pool=counted subs, scenario_ids hidden).
+    # Locks §3+§7 + continuous Q9b: context may carry mains as display-only
+    # background in Phase-2 — never chunked/pooled. Continuous: old-iteration
+    # mains ride as background too (new-only pool, old as context).
     mains_rows: list[dict] = []
     if st.get("phase") == "phase2":
         mains_rows = [c for c in store.list_concepts(session_id)
                       if c.get("kind") == "main"]
+    try:
+        _cur_iter_bg = store.get_iteration(session_id)
+    except Exception:
+        _cur_iter_bg = 1
+    if _cur_iter_bg > 1:
+        try:
+            _old_mains = [c for c in store.list_concepts(session_id)
+                          if c.get("kind") == "main" and int(c.get("iteration") or 1) < _cur_iter_bg]
+        except Exception:
+            _old_mains = []
+        # Merge without duplicates (Phase-2 mains already include old mains).
+        _seen_bg = {c.get("id") for c in mains_rows}
+        for _om in _old_mains:
+            if _om.get("id") not in _seen_bg:
+                mains_rows.append(_om)
+                _seen_bg.add(_om.get("id"))
         mains_bg = "; ".join(
             f"{c['id']}: {c.get('explanation_text','')}" for c in mains_rows)
         if mains_bg:
